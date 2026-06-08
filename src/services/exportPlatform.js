@@ -176,7 +176,7 @@ const MIME = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' }
 const BATCH_SIZE = 20
 
 function getExportMode() {
-  try { return localStorage.getItem('exportEncoding') || 'png-single' } catch { return 'png-single' }
+  try { return localStorage.getItem('exportEncoding') || 'webp-batch' } catch { return 'webp-batch' }
 }
 
 function getWebpQuality() {
