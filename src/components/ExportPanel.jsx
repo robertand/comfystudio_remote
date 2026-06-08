@@ -1329,6 +1329,8 @@ function ExportPanel() {
                       <option value="png-single">PNG (default)</option>
                       <option value="webp-single">WebP rapid</option>
                       <option value="webp-batch">WebP batch + concurent</option>
+                      <option value="jpeg-single">JPEG comprimat</option>
+                      <option value="jpeg-batch">JPEG comprimat + batch</option>
                     </select>
                   </div>
                 )}

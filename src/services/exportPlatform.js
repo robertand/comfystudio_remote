@@ -183,6 +183,10 @@ function getWebpQuality() {
   try { return parseFloat(localStorage.getItem('exportWebpQuality')) || 0.9 } catch { return 0.9 }
 }
 
+function getJpegQuality() {
+  try { return parseFloat(localStorage.getItem('exportJpegQuality')) || 0.2 } catch { return 0.2 }
+}
+
 function createWebPlatform(projectHandle) {
   let sessionId = null
   let frameBatch = []
@@ -238,15 +242,33 @@ function createWebPlatform(projectHandle) {
     async writeFrame(canvas, _dirHandle, index) {
       const mode = getExportMode()
 
+      const toBlob = (mime, q) => new Promise(resolve => canvas.toBlob(resolve, mime, q))
+
       if (mode === 'webp-batch') {
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', getWebpQuality()))
+        const blob = await toBlob('image/webp', getWebpQuality())
+        frameBatch.push({ index, blob })
+        if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
+        return
+      }
+
+      if (mode === 'jpeg-batch') {
+        const blob = await toBlob('image/jpeg', getJpegQuality())
         frameBatch.push({ index, blob })
         if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
         return
       }
 
       if (mode === 'webp-single') {
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', getWebpQuality()))
+        const blob = await toBlob('image/webp', getWebpQuality())
+        await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
+          method: 'POST',
+          body: await blob.arrayBuffer(),
+        })
+        return
+      }
+
+      if (mode === 'jpeg-single') {
+        const blob = await toBlob('image/jpeg', getJpegQuality())
         await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
           method: 'POST',
           body: await blob.arrayBuffer(),
@@ -255,7 +277,7 @@ function createWebPlatform(projectHandle) {
       }
 
       // png-single (default)
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      const blob = await toBlob('image/png')
       await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
         method: 'POST',
         body: await blob.arrayBuffer(),
