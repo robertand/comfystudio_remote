@@ -312,61 +312,136 @@ function comfyProxyPlugin() {
              return
            }
 
-           if (p === '/encode' && req.method === 'POST') {
-             const raw = await bodyBuffer(req)
-             const params = JSON.parse(raw.toString())
-             const s = exportSessions.get(params.sessionId)
-             if (!s) { res.writeHead(404); res.end('Session not found'); return }
+            if (p === '/encode' && req.method === 'POST') {
+              const raw = await bodyBuffer(req)
+              const params = JSON.parse(raw.toString())
+              const s = exportSessions.get(params.sessionId)
+              if (!s) { res.writeHead(404); res.end('Session not found'); return }
 
-             const ext = params.format || 'mp4'
-             const outputPath = path.join(s.dir, `output.${ext}`)
-             const frameDir = path.join(s.dir, 'frames')
-             const frameExt = s.frameExt || 'png'
-             const framePattern = path.join(frameDir, `frame_%06d.${frameExt}`)
-             const args = ['-framerate', String(params.fps), '-i', framePattern]
+              const ext = params.format || 'mp4'
+              const outputPath = path.join(s.dir, `output.${ext}`)
+              const frameDir = path.join(s.dir, 'frames')
+              const frameExt = s.frameExt || 'png'
+              const framePattern = path.join(frameDir, `frame_%06d.${frameExt}`)
 
-             if (s.audioPath && params.includeAudio !== false) {
-               args.push('-i', s.audioPath)
-             }
+              // ── GIF encode (palettegen + paletteuse) ──
+              if (ext === 'gif') {
+                const fps = String(params.fps || 10)
+                const scale = params.width ? `${params.width}:-1:flags=lanczos` : '320:-1:flags=lanczos'
+                const palettePath = path.join(s.dir, 'palette.png')
 
-             const vcodec = params.videoCodec === 'h265' ? 'libx265'
-               : params.videoCodec === 'prores' ? 'prores_ks'
-               : 'libx264'
-             args.push('-c:v', vcodec)
+                try {
+                  // Step 1: generate palette
+                  const p1 = spawn('ffmpeg', [
+                    '-framerate', fps, '-i', framePattern,
+                    '-vf', `fps=${fps},scale=${scale},palettegen=stats_mode=diff`,
+                    '-y', palettePath,
+                  ])
+                  await new Promise((resolve, reject) => {
+                    let e = ''
+                    p1.stderr.on('data', d => { e += d.toString() })
+                    p1.on('close', c => c === 0 ? resolve() : reject(new Error(e.slice(-500))))
+                    p1.on('error', reject)
+                  })
 
-             if (s.audioPath && params.includeAudio !== false) {
-               args.push('-c:a', params.audioCodec === 'opus' ? 'libopus' : params.audioCodec || 'aac')
-             }
+                  // Step 2: create gif with palette
+                  const p2 = spawn('ffmpeg', [
+                    '-framerate', fps, '-i', framePattern,
+                    '-i', palettePath,
+                    '-lavfi', `fps=${fps},scale=${scale}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5`,
+                    '-y', outputPath,
+                  ])
+                  await new Promise((resolve, reject) => {
+                    let e = ''
+                    p2.stderr.on('data', d => { e += d.toString() })
+                    p2.on('close', c => c === 0 ? resolve() : reject(new Error(e.slice(-500))))
+                    p2.on('error', reject)
+                  })
 
-             if (params.preset && params.videoCodec !== 'prores') args.push('-preset', params.preset)
-             if (params.crf != null && params.videoCodec !== 'prores') args.push('-crf', String(params.crf))
-             if (params.bitrateKbps && params.videoCodec !== 'prores') args.push('-b:v', `${params.bitrateKbps}k`)
-             if (params.proresProfile && params.videoCodec === 'prores') args.push('-profile:v', params.proresProfile)
+                  const stat = fs.statSync(outputPath)
+                  res.writeHead(200, {
+                    'Content-Type': 'image/gif',
+                    'Content-Length': stat.size,
+                    'Content-Disposition': `attachment; filename="export.gif"`,
+                  })
+                  fs.createReadStream(outputPath).pipe(res)
+                } catch (err) {
+                  res.writeHead(500, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ error: `gif encode failed: ${err.message}` }))
+                }
+                return
+              }
 
-             args.push('-y', outputPath)
+              // ── PNG sequence (ZIP) ──
+              if (ext === 'zip') {
+                try {
+                  const zipPath = path.join(s.dir, 'frames.zip')
+                  const zip = spawn('zip', ['-j', zipPath, path.join(frameDir, '*')])
+                  await new Promise((resolve, reject) => {
+                    let e = ''
+                    zip.stderr.on('data', d => { e += d.toString() })
+                    zip.on('close', c => c === 0 ? resolve() : reject(new Error(e.slice(-500))))
+                    zip.on('error', reject)
+                  })
+                  const stat = fs.statSync(zipPath)
+                  res.writeHead(200, {
+                    'Content-Type': 'application/zip',
+                    'Content-Length': stat.size,
+                    'Content-Disposition': `attachment; filename="frames.zip"`,
+                  })
+                  fs.createReadStream(zipPath).pipe(res)
+                } catch (err) {
+                  res.writeHead(500, { 'Content-Type': 'application/json' })
+                  res.end(JSON.stringify({ error: `zip failed: ${err.message}` }))
+                }
+                return
+              }
 
-             const ff = spawn('ffmpeg', args)
-             let stderr = ''
-             ff.stderr.on('data', d => { stderr += d.toString() })
+              // ── Video encode (mp4 / webm / mov) ──
+              const args = ['-framerate', String(params.fps), '-i', framePattern]
 
-             try {
-               await new Promise((resolve, reject) => {
-                 ff.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(-500))))
-                 ff.on('error', reject)
-               })
-               const stat = fs.statSync(outputPath)
-               res.writeHead(200, {
-                 'Content-Type': `video/${ext}`,
-                 'Content-Length': stat.size,
-                 'Content-Disposition': `attachment; filename="export.${ext}"`,
-               })
-               fs.createReadStream(outputPath).pipe(res)
-             } catch (err) {
-               res.writeHead(500, { 'Content-Type': 'application/json' })
-               res.end(JSON.stringify({ error: `ffmpeg failed: ${err.message}` }))
-             }
-             return
-           }
+              if (s.audioPath && params.includeAudio !== false) {
+                args.push('-i', s.audioPath)
+              }
+
+              const vcodec = params.videoCodec === 'h265' ? 'libx265'
+                : params.videoCodec === 'prores' ? 'prores_ks'
+                : 'libx264'
+              args.push('-c:v', vcodec)
+
+              if (s.audioPath && params.includeAudio !== false) {
+                args.push('-c:a', params.audioCodec === 'opus' ? 'libopus' : params.audioCodec || 'aac')
+              }
+
+              if (params.preset && params.videoCodec !== 'prores') args.push('-preset', params.preset)
+              if (params.crf != null && params.videoCodec !== 'prores') args.push('-crf', String(params.crf))
+              if (params.bitrateKbps && params.videoCodec !== 'prores') args.push('-b:v', `${params.bitrateKbps}k`)
+              if (params.proresProfile && params.videoCodec === 'prores') args.push('-profile:v', params.proresProfile)
+
+              args.push('-y', outputPath)
+
+              const ff = spawn('ffmpeg', args)
+              let stderr = ''
+              ff.stderr.on('data', d => { stderr += d.toString() })
+
+              try {
+                await new Promise((resolve, reject) => {
+                  ff.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(-500))))
+                  ff.on('error', reject)
+                })
+                const stat = fs.statSync(outputPath)
+                res.writeHead(200, {
+                  'Content-Type': `video/${ext}`,
+                  'Content-Length': stat.size,
+                  'Content-Disposition': `attachment; filename="export.${ext}"`,
+                })
+                fs.createReadStream(outputPath).pipe(res)
+              } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ error: `ffmpeg failed: ${err.message}` }))
+              }
+              return
+            }
 
            const mCleanup = p.match(/^\/cleanup\/([^/]+)$/)
            if (mCleanup && req.method === 'POST') {

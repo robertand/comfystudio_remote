@@ -171,7 +171,7 @@ function createElectronPlatform(projectHandle) {
 let _saveHandle = null
 let _saveFilename = null
 
-const MIME = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' }
+const MIME = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', gif: 'image/gif', zip: 'application/zip' }
 
 const BATCH_SIZE = 20
 
@@ -297,9 +297,9 @@ function createWebPlatform(projectHandle) {
             suggestedName: filename,
             types: [{
               description: 'Video file',
-              accept: Object.fromEntries(
-                ['mp4', 'webm', 'mov'].map(e => [MIME[e], ['.' + e]])
-              ),
+            accept: Object.fromEntries(
+              ['mp4', 'webm', 'mov', 'gif', 'zip'].map(e => [MIME[e], ['.' + e]])
+            ),
             }],
           })
           return _saveHandle.name

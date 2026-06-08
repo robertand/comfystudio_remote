@@ -12,8 +12,8 @@ const EXPORT_FORMATS = [
   { id: 'mp4', label: 'MP4 (H.264/H.265)' },
   { id: 'webm', label: 'WebM (VP9)' },
   { id: 'prores', label: 'MOV (ProRes)' },
-  { id: 'gif', label: 'GIF (Preview - Soon)', disabled: true },
-  { id: 'png-seq', label: 'PNG Sequence - Soon', disabled: true },
+  { id: 'gif', label: 'GIF' },
+  { id: 'png-seq', label: 'PNG Sequence' },
 ]
 
 const RANGE_PRESETS = [
@@ -32,6 +32,12 @@ const VIDEO_CODECS = {
   ],
   prores: [
     { id: 'prores', label: 'ProRes' },
+  ],
+  gif: [
+    { id: 'gif', label: 'GIF' },
+  ],
+  'png-seq': [
+    { id: 'png', label: 'PNG' },
   ],
 }
 
@@ -790,9 +796,6 @@ function ExportPanel() {
   }, [clips, transitions, tracks, settings, getCurrentTimelineSettings, nvencStatus, proxyCoverage])
 
   const runExportJob = async (jobSettings, labelOverride = null) => {
-    if (jobSettings.format === 'gif' || jobSettings.format === 'png-seq') {
-      throw new Error('GIF and PNG sequence export are not wired yet.')
-    }
     if (jobSettings.useHardwareEncoder && nvencStatus.checked) {
       const codecSupported = jobSettings.videoCodec === 'h265'
         ? nvencStatus.h265

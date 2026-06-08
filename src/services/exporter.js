@@ -782,7 +782,11 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
   
   const { outputFolder, tempFolder, framesFolder } = await platform.createExportDirs()
   
-  const outputExtension = format === 'webm' ? 'webm' : (format === 'prores' ? 'mov' : 'mp4')
+  const outputExtension = format === 'webm' ? 'webm'
+    : format === 'prores' ? 'mov'
+    : format === 'gif' ? 'gif'
+    : format === 'png-seq' ? 'zip'
+    : 'mp4'
   let outputPath = options.outputPath
   if (!outputPath) {
     const defaultOutputPath = `${outputFolder}/${filename}.${outputExtension}`
