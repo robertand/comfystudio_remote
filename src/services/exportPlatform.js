@@ -166,7 +166,7 @@ function createElectronPlatform(projectHandle) {
   }
 }
 
-// ── Web platform (remote, server-side encoding) ───────────────────
+// ── Web platform (remote, server-side encoding + WebCodecs) ───────
 
 let _saveHandle = null
 let _saveFilename = null
@@ -174,6 +174,13 @@ let _saveFilename = null
 const MIME = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' }
 
 const BATCH_SIZE = 20
+
+// WebCodecs encoder state
+let _wcEncoder = null
+let _wcMuxer = null
+let _wcFrameIndex = 0
+let _wcConfig = null
+let _wcMuxerClass = null
 
 function getExportMode() {
   try { return localStorage.getItem('exportEncoding') || 'webp-batch' } catch { return 'webp-batch' }
@@ -187,6 +194,46 @@ function getJpegQuality() {
   try { return parseFloat(localStorage.getItem('exportJpegQuality')) || 0.2 } catch { return 0.2 }
 }
 
+async function encodeViaWebCodecs(canvas, frameIndex) {
+  const cfg = _wcConfig
+  if (!cfg) return
+
+  if (!_wcEncoder) {
+    const { Muxer } = await import('mp4-muxer')
+    _wcMuxerClass = Muxer
+
+    const w = canvas.width, h = canvas.height
+    _wcMuxer = new Muxer({
+      fastStart: 'in-memory',
+      video: { width: w, height: h, codec: 'avc1.42001E' },
+    })
+
+    _wcEncoder = new VideoEncoder({
+      output: (chunk, meta) => _wcMuxer.addVideoChunk(chunk, meta),
+      error: (e) => console.error('VideoEncoder error:', e),
+    })
+    _wcEncoder.configure({
+      codec: 'avc1.42001E',
+      width: w,
+      height: h,
+      bitrate: (cfg.bitrateKbps || 5000) * 1000,
+      framerate: cfg.fps || 30,
+    })
+    _wcFrameIndex = 0
+  }
+
+  const ctx = canvas.getContext('2d')
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const fps = cfg.fps || 30
+  const frame = new VideoFrame(imageData, {
+    timestamp: _wcFrameIndex * 1e6 / fps,
+    duration: 1e6 / fps,
+  })
+  _wcEncoder.encodeFrame(frame)
+  frame.close()
+  _wcFrameIndex++
+}
+
 function createWebPlatform(projectHandle) {
   let sessionId = null
   let frameBatch = []
@@ -197,6 +244,10 @@ function createWebPlatform(projectHandle) {
     isElectron: false,
 
     async createExportDirs() {
+      const mode = getExportMode()
+      if (mode === 'webcodecs-mp4') {
+        return { outputFolder: '', tempFolder: '', framesFolder: '' }
+      }
       const res = await fetch(`${EXPORT_API}/create-session`, { method: 'POST' })
       if (!res.ok) throw new Error('Failed to create export session on server')
       const data = await res.json()
@@ -231,7 +282,11 @@ function createWebPlatform(projectHandle) {
 
     canUseDirectFramePipe: false,
 
-    async startFramePipe() { return null },
+    async startFramePipe(opts) {
+      // Store config for WebCodecs (even though pipe itself isn't used)
+      _wcConfig = opts
+      return null
+    },
 
     async writeFrameToPipe() { return false },
 
@@ -241,6 +296,11 @@ function createWebPlatform(projectHandle) {
 
     async writeFrame(canvas, _dirHandle, index) {
       const mode = getExportMode()
+
+      if (mode === 'webcodecs-mp4') {
+        await encodeViaWebCodecs(canvas, index)
+        return
+      }
 
       const toBlob = (mime, q) => new Promise(resolve => canvas.toBlob(resolve, mime, q))
 
@@ -276,7 +336,7 @@ function createWebPlatform(projectHandle) {
         return
       }
 
-      // png-single (default)
+      // png-single
       const blob = await toBlob('image/png')
       await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
         method: 'POST',
@@ -319,6 +379,35 @@ function createWebPlatform(projectHandle) {
     },
 
     async encodeVideo(opts) {
+      // WebCodecs path: finalize encoder + muxer and save
+      if (_wcMuxer) {
+        try {
+          await _wcEncoder.flush()
+          _wcEncoder.close()
+          const mp4Buf = _wcMuxer.finalize()
+          _wcEncoder = null; _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
+
+          const blob = new Blob([mp4Buf], { type: 'video/mp4' })
+          const ext = opts.format || 'mp4'
+          const filename = opts.outputPath || _saveFilename || `export.${ext}`
+
+          if (_saveHandle) {
+            const h = _saveHandle; _saveHandle = null
+            const writable = await h.createWritable()
+            await writable.write(blob)
+            await writable.close()
+            return { success: true, outputPath: _saveFilename || filename, encoderUsed: 'WebCodecs H.264' }
+          }
+          downloadBlob(blob, filename)
+          return { success: true, outputPath: filename, encoderUsed: 'WebCodecs H.264' }
+        } catch (err) {
+          console.error('WebCodecs encoding failed:', err)
+          _wcEncoder = null; _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
+          return { success: false, error: err.message || 'WebCodecs encoding failed' }
+        }
+      }
+
+      // Server encoding path
       try {
         const res = await fetch(`${EXPORT_API}/encode`, {
           method: 'POST',
@@ -358,6 +447,8 @@ function createWebPlatform(projectHandle) {
     },
 
     async cleanup() {
+      if (_wcEncoder) { try { _wcEncoder.close() } catch {}; _wcEncoder = null }
+      _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
       if (sessionId) {
         try { await fetch(`${EXPORT_API}/cleanup/${sessionId}`, { method: 'POST' }) } catch {}
         sessionId = null

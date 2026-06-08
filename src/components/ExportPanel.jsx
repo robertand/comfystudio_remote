@@ -318,11 +318,17 @@ function ExportPanel() {
   const [queuePaused, setQueuePaused] = useState(false)
   const [queuePauseRequested, setQueuePauseRequested] = useState(false)
   const [encodingMode, setEncodingMode] = useState(() => {
-    try { return localStorage.getItem('exportEncoding') || 'webp-batch' } catch { return 'webp-batch' }
+    try {
+      const saved = localStorage.getItem('exportEncoding')
+      if (saved === 'webcodecs-mp4' && (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined')) return 'webp-batch'
+      return saved || 'webp-batch'
+    } catch { return 'webp-batch' }
   })
   useEffect(() => {
     try { localStorage.setItem('exportEncoding', encodingMode) } catch {}
   }, [encodingMode])
+
+  const webcodecsAvail = typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined'
 
   const queueRef = useRef([])
   const queueControllerRef = useRef({ running: false, paused: false })
@@ -1328,6 +1334,7 @@ function ExportPanel() {
                     >
                       <option value="webp-batch">WebP batch + concurent</option>
                       <option value="webp-single">WebP rapid</option>
+                      <option value="webcodecs-mp4" disabled={!webcodecsAvail}>WebCodecs H.264 (hardware) {!webcodecsAvail ? '— browser neacceptat' : ''}</option>
                       <option value="png-single">PNG</option>
                       <option value="jpeg-batch">JPEG comprimat + batch</option>
                       <option value="jpeg-single">JPEG comprimat</option>
