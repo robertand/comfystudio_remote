@@ -376,7 +376,9 @@ function comfyProxyPlugin() {
               if (ext === 'zip') {
                 try {
                   const zipPath = path.join(s.dir, 'frames.zip')
-                  const zip = spawn('zip', ['-j', zipPath, path.join(frameDir, '*')])
+                  const frameFiles = fs.readdirSync(frameDir).map(f => path.join(frameDir, f))
+                  const zip = spawn('zip', ['-j', zipPath, '-@'])
+                  zip.stdin.end(frameFiles.join('\n'))
                   await new Promise((resolve, reject) => {
                     let e = ''
                     zip.stderr.on('data', d => { e += d.toString() })
