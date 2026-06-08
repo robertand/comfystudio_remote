@@ -316,6 +316,13 @@ function ExportPanel() {
   const [queueRunning, setQueueRunning] = useState(false)
   const [queuePaused, setQueuePaused] = useState(false)
   const [queuePauseRequested, setQueuePauseRequested] = useState(false)
+  const [encodingMode, setEncodingMode] = useState(() => {
+    try { return localStorage.getItem('exportEncoding') || 'png-single' } catch { return 'png-single' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('exportEncoding', encodingMode) } catch {}
+  }, [encodingMode])
+
   const queueRef = useRef([])
   const queueControllerRef = useRef({ running: false, paused: false })
   const previousSettingsStorageKeyRef = useRef(settingsStorageKey)
@@ -1309,6 +1316,21 @@ function ExportPanel() {
                     ))}
                   </select>
                 </div>
+
+                {!isElectron() && (
+                  <div>
+                    <label className="text-[10px] text-sf-text-muted uppercase tracking-wider">Frame Upload</label>
+                    <select
+                      value={encodingMode}
+                      onChange={(e) => setEncodingMode(e.target.value)}
+                      className="mt-1 w-full bg-sf-dark-800 border border-sf-dark-600 rounded px-2 py-1 text-xs text-sf-text-primary focus:outline-none focus:border-sf-accent"
+                    >
+                      <option value="png-single">PNG (default)</option>
+                      <option value="webp-single">WebP rapid</option>
+                      <option value="webp-batch">WebP batch + concurent</option>
+                    </select>
+                  </div>
+                )}
                 
                 <div className="col-span-2">
                   <div className="flex items-center gap-2">
