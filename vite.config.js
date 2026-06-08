@@ -6,6 +6,9 @@ import https from 'https'
 import { WebSocket as NodeWebSocket, WebSocketServer } from 'ws'
 import fs from 'fs'
 import zlib from 'zlib'
+import os from 'os'
+import { spawn } from 'child_process'
+import crypto from 'crypto'
 
 const isElectron = process.env.ELECTRON === 'true'
 const DEFAULT_COMFY_TARGET = process.env.VITE_COMFY_URL || 'http://127.0.0.1:8188'
@@ -234,6 +237,150 @@ function comfyProxyPlugin() {
         req.url = subPath || '/'
       })
 
+       // On-server export encoding API — MUST be registered before the /api/ proxy below.
+       const EXPORT_BASE = path.join(os.tmpdir(), 'comfy-export-sessions')
+       const exportSessions = new Map()
+       setInterval(() => {
+         const now = Date.now()
+         for (const [id, s] of exportSessions) {
+           if (now - s.createdAt > 3600000) {
+             fs.rmSync(s.dir, { recursive: true, force: true });
+             exportSessions.delete(id)
+           }
+         }
+       }, 60000)
+
+       const bodyBuffer = (req) => new Promise((resolve, reject) => {
+         const chunks = [];
+         req.on('data', c => chunks.push(c));
+         req.on('end', () => resolve(Buffer.concat(chunks)));
+         req.on('error', reject);
+       })
+
+       server.middlewares.use('/api/export', async (req, res, next) => {
+         try {
+           const u = new URL(req.url, 'http://localhost')
+           const p = u.pathname.replace(/\/$/, '')
+           console.log(`[export-api] ${req.method} ${req.url} -> pathname=${u.pathname} stripped=${p}`)
+
+           if (p === '/ping' && req.method === 'GET') {
+             res.writeHead(200, { 'Content-Type': 'application/json' })
+             res.end(JSON.stringify({ ok: true, node: process.version }))
+             return
+           }
+
+           if (p === '/create-session' && req.method === 'POST') {
+             const id = crypto.randomUUID()
+             const dir = path.join(EXPORT_BASE, id)
+             fs.mkdirSync(path.join(dir, 'frames'), { recursive: true })
+             exportSessions.set(id, { dir, createdAt: Date.now() })
+             res.writeHead(200, { 'Content-Type': 'application/json' })
+             res.end(JSON.stringify({ sessionId: id }))
+             return
+           }
+
+           const mUploadFrame = p.match(/^\/upload-frame\/([^/]+)\/(\d+)$/)
+           if (mUploadFrame && req.method === 'POST') {
+             const [, sid, idx] = mUploadFrame
+             const s = exportSessions.get(sid)
+             if (!s) { res.writeHead(404); res.end('Session not found'); return }
+             const buf = await bodyBuffer(req)
+             const name = `frame_${String(parseInt(idx) + 1).padStart(6, '0')}.png`
+             fs.writeFileSync(path.join(s.dir, 'frames', name), buf)
+             res.writeHead(200, { 'Content-Type': 'application/json' })
+             res.end(JSON.stringify({ ok: true }))
+             return
+           }
+
+           const mUploadAudio = p.match(/^\/upload-audio\/([^/]+)$/)
+           if (mUploadAudio && req.method === 'POST') {
+             const [, sid] = mUploadAudio
+             const s = exportSessions.get(sid)
+             if (!s) { res.writeHead(404); res.end('Session not found'); return }
+             const buf = await bodyBuffer(req)
+             const audioPath = path.join(s.dir, 'audio.wav')
+             fs.writeFileSync(audioPath, buf)
+             s.audioPath = audioPath
+             res.writeHead(200, { 'Content-Type': 'application/json' })
+             res.end(JSON.stringify({ ok: true }))
+             return
+           }
+
+           if (p === '/encode' && req.method === 'POST') {
+             const raw = await bodyBuffer(req)
+             const params = JSON.parse(raw.toString())
+             const s = exportSessions.get(params.sessionId)
+             if (!s) { res.writeHead(404); res.end('Session not found'); return }
+
+             const ext = params.format || 'mp4'
+             const outputPath = path.join(s.dir, `output.${ext}`)
+             const framePattern = path.join(s.dir, 'frames', 'frame_%06d.png')
+             const args = ['-framerate', String(params.fps), '-i', framePattern]
+
+             if (s.audioPath && params.includeAudio !== false) {
+               args.push('-i', s.audioPath)
+             }
+
+             const vcodec = params.videoCodec === 'h265' ? 'libx265'
+               : params.videoCodec === 'prores' ? 'prores_ks'
+               : 'libx264'
+             args.push('-c:v', vcodec)
+
+             if (s.audioPath && params.includeAudio !== false) {
+               args.push('-c:a', params.audioCodec === 'opus' ? 'libopus' : params.audioCodec || 'aac')
+             }
+
+             if (params.preset && params.videoCodec !== 'prores') args.push('-preset', params.preset)
+             if (params.crf != null && params.videoCodec !== 'prores') args.push('-crf', String(params.crf))
+             if (params.bitrateKbps && params.videoCodec !== 'prores') args.push('-b:v', `${params.bitrateKbps}k`)
+             if (params.proresProfile && params.videoCodec === 'prores') args.push('-profile:v', params.proresProfile)
+
+             args.push('-y', outputPath)
+
+             const ff = spawn('ffmpeg', args)
+             let stderr = ''
+             ff.stderr.on('data', d => { stderr += d.toString() })
+
+             try {
+               await new Promise((resolve, reject) => {
+                 ff.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(-500))))
+                 ff.on('error', reject)
+               })
+               const stat = fs.statSync(outputPath)
+               res.writeHead(200, {
+                 'Content-Type': `video/${ext}`,
+                 'Content-Length': stat.size,
+                 'Content-Disposition': `attachment; filename="export.${ext}"`,
+               })
+               fs.createReadStream(outputPath).pipe(res)
+             } catch (err) {
+               res.writeHead(500, { 'Content-Type': 'application/json' })
+               res.end(JSON.stringify({ error: `ffmpeg failed: ${err.message}` }))
+             }
+             return
+           }
+
+           const mCleanup = p.match(/^\/cleanup\/([^/]+)$/)
+           if (mCleanup && req.method === 'POST') {
+             const [, sid] = mCleanup
+             const s = exportSessions.get(sid)
+             if (s) {
+               fs.rmSync(s.dir, { recursive: true, force: true });
+               exportSessions.delete(sid)
+             }
+             res.writeHead(200, { 'Content-Type': 'application/json' })
+             res.end(JSON.stringify({ ok: true }))
+             return
+           }
+
+           next()
+         } catch (err) {
+           console.error('Export API error:', err)
+           res.writeHead(500, { 'Content-Type': 'application/json' })
+           res.end(JSON.stringify({ error: err.message }))
+         }
+       })
+
       // ComfyUI API paths — proxied dynamically to the active target.
       // Connect middleware mount points with a trailing slash (e.g. /api/)
       // strip that prefix from req.url; those without trailing slash (e.g.
@@ -349,11 +496,13 @@ function comfyProxyPlugin() {
             clearInterval(heartbeat)
             try { browserWs.close() } catch {}
           })
-        })
-      })
-    },
-  }
-}
+         })
+       })
+
+        // POST / PUT / DELETE /comfy/*
+     },
+   }
+ }
 
 const defaultProxyTarget = DEFAULT_COMFY_TARGET
 
