@@ -181,6 +181,8 @@ let _wcMuxer = null
 let _wcFrameIndex = 0
 let _wcConfig = null
 let _wcMuxerClass = null
+let _wcArrayBufferTargetClass = null
+let _wcArrayBufferTarget = null
 
 function getExportMode() {
   try { return localStorage.getItem('exportEncoding') || 'webp-batch' } catch { return 'webp-batch' }
@@ -200,11 +202,11 @@ async function encodeViaWebCodecs(canvas, frameIndex) {
 
   if (!_wcEncoder) {
     try {
-      const { Muxer } = await import('mp4-muxer')
-      _wcMuxerClass = Muxer
+      const mod = await import('mp4-muxer')
+      _wcMuxerClass = mod.Muxer
+      _wcArrayBufferTargetClass = mod.ArrayBufferTarget
     } catch (err) {
       console.error('WebCodecs init: failed to load mp4-muxer', err)
-      // Fall back to a server mode
       _wcEncoder = 'FAILED'
       throw new Error(`mp4-muxer import failed: ${err.message}`)
     }
@@ -212,8 +214,9 @@ async function encodeViaWebCodecs(canvas, frameIndex) {
     const w = canvas.width, h = canvas.height
 
     try {
+      _wcArrayBufferTarget = new (_wcArrayBufferTargetClass)()
       _wcMuxer = new (_wcMuxerClass)({
-        fastStart: 'in-memory',
+        target: _wcArrayBufferTarget,
         video: { width: w, height: h, codec: 'avc1.42001E' },
       })
     } catch (err) {
@@ -417,8 +420,9 @@ function createWebPlatform(projectHandle) {
         try {
           await _wcEncoder.flush()
           _wcEncoder.close()
-          const mp4Buf = _wcMuxer.finalize()
-          _wcEncoder = null; _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
+          _wcMuxer.finalize()
+          const mp4Buf = _wcArrayBufferTarget.buffer
+          _wcEncoder = null; _wcMuxer = null; _wcArrayBufferTarget = null; _wcConfig = null; _wcFrameIndex = 0
 
           const blob = new Blob([mp4Buf], { type: 'video/mp4' })
           const ext = opts.format || 'mp4'
@@ -435,7 +439,7 @@ function createWebPlatform(projectHandle) {
           return { success: true, outputPath: filename, encoderUsed: 'WebCodecs H.264' }
         } catch (err) {
           console.error('WebCodecs encoding failed:', err)
-          _wcEncoder = null; _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
+          _wcEncoder = null; _wcMuxer = null; _wcArrayBufferTarget = null; _wcConfig = null; _wcFrameIndex = 0
           return { success: false, error: err.message || 'WebCodecs encoding failed' }
         }
       }
@@ -485,7 +489,7 @@ function createWebPlatform(projectHandle) {
 
     async cleanup() {
       if (_wcEncoder) { try { _wcEncoder.close() } catch {}; _wcEncoder = null }
-      _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
+      _wcMuxer = null; _wcArrayBufferTarget = null; _wcConfig = null; _wcFrameIndex = 0
       if (sessionId) {
         try { await fetch(`${EXPORT_API}/cleanup/${sessionId}`, { method: 'POST' }) } catch {}
         sessionId = null
