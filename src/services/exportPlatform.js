@@ -188,6 +188,10 @@ function getExportMode() {
   try { return localStorage.getItem('exportEncoding') || 'webp-batch' } catch { return 'webp-batch' }
 }
 
+function webCodecsCanFormat(format) {
+  return format !== 'gif' && format !== 'png-seq'
+}
+
 function getWebpQuality() {
   try { return parseFloat(localStorage.getItem('exportWebpQuality')) || 0.9 } catch { return 0.9 }
 }
@@ -274,11 +278,13 @@ function createWebPlatform(projectHandle) {
     projectHandle,
     isElectron: false,
 
-    async createExportDirs() {
+    async createExportDirs(format) {
       const mode = getExportMode()
-      if (mode === 'webcodecs-mp4') {
+      if (mode === 'webcodecs-mp4' && webCodecsCanFormat(format)) {
         return { outputFolder: '', tempFolder: '', framesFolder: '' }
       }
+      // Clear any stale WebCodecs state when forcing server mode for gif/png-seq
+      _wcEncoder = null; _wcMuxer = null; _wcArrayBufferTarget = null; _wcConfig = null; _wcFrameIndex = 0
       const res = await fetch(`${EXPORT_API}/create-session`, { method: 'POST' })
       if (!res.ok) throw new Error('Failed to create export session on server')
       const data = await res.json()
@@ -326,32 +332,41 @@ function createWebPlatform(projectHandle) {
     async abortFramePipe() {},
 
     async writeFrame(canvas, _dirHandle, index, fps) {
-      const mode = getExportMode()
+      // If we have a server session, use server-based upload (not WebCodecs)
+      if (sessionId) {
+        const mode = getExportMode()
+        const toBlob = (mime, q) => new Promise(resolve => canvas.toBlob(resolve, mime, q))
 
-      if (mode === 'webcodecs-mp4') {
-        if (!_wcConfig) _wcConfig = { fps: fps || 30, bitrateKbps: 5000 }
-        await encodeViaWebCodecs(canvas, index)
-        return
-      }
-
-      const toBlob = (mime, q) => new Promise(resolve => canvas.toBlob(resolve, mime, q))
-
-      if (mode === 'webp-batch') {
-        const blob = await toBlob('image/webp', getWebpQuality())
-        frameBatch.push({ index, blob })
-        if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
-        return
-      }
-
-      if (mode === 'jpeg-batch') {
-        const blob = await toBlob('image/jpeg', getJpegQuality())
-        frameBatch.push({ index, blob })
-        if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
-        return
-      }
-
-      if (mode === 'webp-single') {
-        const blob = await toBlob('image/webp', getWebpQuality())
+        if (mode === 'webp-batch') {
+          const blob = await toBlob('image/webp', getWebpQuality())
+          frameBatch.push({ index, blob })
+          if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
+          return
+        }
+        if (mode === 'jpeg-batch') {
+          const blob = await toBlob('image/jpeg', getJpegQuality())
+          frameBatch.push({ index, blob })
+          if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
+          return
+        }
+        if (mode === 'webp-single') {
+          const blob = await toBlob('image/webp', getWebpQuality())
+          await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
+            method: 'POST',
+            body: await blob.arrayBuffer(),
+          })
+          return
+        }
+        if (mode === 'jpeg-single') {
+          const blob = await toBlob('image/jpeg', getJpegQuality())
+          await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
+            method: 'POST',
+            body: await blob.arrayBuffer(),
+          })
+          return
+        }
+        // png-single (default)
+        const blob = await toBlob('image/png')
         await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
           method: 'POST',
           body: await blob.arrayBuffer(),
@@ -359,21 +374,9 @@ function createWebPlatform(projectHandle) {
         return
       }
 
-      if (mode === 'jpeg-single') {
-        const blob = await toBlob('image/jpeg', getJpegQuality())
-        await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
-          method: 'POST',
-          body: await blob.arrayBuffer(),
-        })
-        return
-      }
-
-      // png-single
-      const blob = await toBlob('image/png')
-      await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
-        method: 'POST',
-        body: await blob.arrayBuffer(),
-      })
+      // WebCodecs path (no server session)
+      if (!_wcConfig) _wcConfig = { fps: fps || 30, bitrateKbps: 5000 }
+      await encodeViaWebCodecs(canvas, index)
     },
 
     async flushFrames() {

@@ -780,7 +780,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
     throw new Error('Project folder not available for export.')
   }
   
-  const { outputFolder, tempFolder, framesFolder } = await platform.createExportDirs()
+  const { outputFolder, tempFolder, framesFolder } = await platform.createExportDirs(format)
   
   const outputExtension = format === 'webm' ? 'webm'
     : format === 'prores' ? 'mov'
