@@ -4,6 +4,7 @@ import useProjectStore, { RESOLUTION_PRESETS, FPS_PRESETS } from '../stores/proj
 import useTimelineStore from '../stores/timelineStore'
 import useAssetsStore from '../stores/assetsStore'
 import exportTimeline from '../services/exporter'
+import { isElectron } from '../services/exportPlatform'
 
 const EXPORT_SETTINGS_STORAGE_PREFIX = 'comfystudio-export-settings-v1'
 
