@@ -247,7 +247,10 @@ async function encodeViaWebCodecs(canvas, frameIndex) {
   try {
     const ctx = canvas.getContext('2d')
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const frame = new VideoFrame(imageData, {
+    const frame = new VideoFrame(imageData.data.buffer, {
+      format: 'RGBA',
+      codedWidth: canvas.width,
+      codedHeight: canvas.height,
       timestamp: _wcFrameIndex * 1e6 / fps,
       duration: 1e6 / fps,
     })
