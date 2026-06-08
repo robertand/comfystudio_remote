@@ -26,6 +26,7 @@ import {
 } from '../utils/effects'
 import { applyGlslEffectsToCanvas, hasGlslEffect } from '../utils/glslEffects'
 import { cullVisualLayerEntries, getTransitionClipIds } from '../utils/layerCompositing'
+import { createExportPlatform, isElectron } from './exportPlatform'
 
 const DEFAULT_SAMPLE_RATE = 44100
 const AUDIO_FETCH_TIMEOUT_MS = 15000
@@ -111,35 +112,7 @@ const yieldToMain = () => new Promise(resolve => {
 /** Stronger yield: give the event loop a full time slice (helps prevent renderer crash under heavy export) */
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
 
-const isElectron = () => typeof window !== 'undefined' && window.electronAPI != null
-
-/** Resolve asset to a stable file:// URL for export when in Electron to avoid blob URL invalidation / OOM */
-async function getExportAssetUrl(asset, projectHandle) {
-  if (!asset?.url) return null
-  if (isElectron() && projectHandle && asset.path) {
-    try {
-      const filePath = await window.electronAPI.pathJoin(projectHandle, asset.path)
-      return await window.electronAPI.getFileUrlDirect(filePath)
-    } catch (e) {
-      console.warn('Export: could not resolve file URL for asset, using blob:', asset.name, e)
-    }
-  }
-  return asset.url
-}
-
-async function getExportProxyUrl(asset, projectHandle) {
-  if (!asset || asset.type !== 'video') return null
-  if (asset.proxyStatus !== 'ready' || !asset.proxyPath) return null
-  if (isElectron() && projectHandle && asset.proxyPath) {
-    try {
-      const filePath = await window.electronAPI.pathJoin(projectHandle, asset.proxyPath)
-      return await window.electronAPI.getFileUrlDirect(filePath)
-    } catch (e) {
-      console.warn('Export: could not resolve proxy URL, using original:', asset.name, e)
-    }
-  }
-  return asset.proxyUrl || null
-}
+// isElectron is imported from exportPlatform
 
 const loadImage = async (url) => {
   const img = new Image()
@@ -801,48 +774,32 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
     positionY: (Number(transform.positionY) || 0) * transformScaleY,
   })
   
-  if (!projectState.currentProjectHandle || typeof projectState.currentProjectHandle !== 'string') {
+  const projectHandle = projectState.currentProjectHandle
+  const platform = createExportPlatform(projectHandle)
+  if (!projectHandle) {
     throw new Error('Project folder not available for export.')
   }
   
-  const outputFolder = await window.electronAPI.pathJoin(projectState.currentProjectHandle, 'renders')
-  await window.electronAPI.createDirectory(outputFolder)
-  
-  const tempFolder = await window.electronAPI.pathJoin(outputFolder, `export_${Date.now()}`)
-  await window.electronAPI.createDirectory(tempFolder)
-  const framesFolder = await window.electronAPI.pathJoin(tempFolder, 'frames')
-  await window.electronAPI.createDirectory(framesFolder)
+  const { outputFolder, tempFolder, framesFolder } = await platform.createExportDirs()
   
   const outputExtension = format === 'webm' ? 'webm' : (format === 'prores' ? 'mov' : 'mp4')
   let outputPath = options.outputPath
   if (!outputPath) {
-    const defaultOutputPath = await window.electronAPI.pathJoin(
-      outputFolder,
-      `${filename}.${outputExtension}`
-    )
-    const saveDialog = await window.electronAPI.saveFileDialog({
-      title: 'Export Timeline',
-      defaultPath: defaultOutputPath,
-      filters: [
-        { name: outputExtension.toUpperCase(), extensions: [outputExtension] },
-      ],
-    })
-    if (!saveDialog) {
+    const defaultOutputPath = `${outputFolder}/${filename}.${outputExtension}`
+    const savePath = await platform.resolveOutputPath(defaultOutputPath, outputExtension)
+    if (!savePath) {
       throw new Error('Export cancelled')
     }
-    outputPath = saveDialog
+    outputPath = savePath
   }
-  const framePattern = await window.electronAPI.pathJoin(framesFolder, 'frame_%06d.png')
-  const audioPath = await window.electronAPI.pathJoin(tempFolder, 'audio.wav')
+  const framePattern = platform.getFramePattern(framesFolder)
+  const audioPath = platform.getAudioPath(tempFolder)
   const canUseDirectFramePipe = Boolean(
     useDirectFramePipe
-    && window.electronAPI?.startFramePipe
-    && window.electronAPI?.writeFrameToPipe
-    && window.electronAPI?.finishFramePipe
-    && window.electronAPI?.abortFramePipe
+    && platform.canUseDirectFramePipe
   )
   const pipedVideoPath = canUseDirectFramePipe && includeAudio
-    ? await window.electronAPI.pathJoin(tempFolder, `video_only.${outputExtension}`)
+    ? platform.getPipedVideoPath(tempFolder, outputExtension)
     : outputPath
   let framePipeSessionId = null
   let framePipeEncoderUsed = null
@@ -902,12 +859,11 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
         cachedVideoSources.set(clip.id, clip.cacheUrl)
         continue
       }
-      if (clip.cachePath && typeof projectState.currentProjectHandle === 'string') {
+      if (clip.cachePath) {
         try {
-          const filePath = await window.electronAPI.pathJoin(projectState.currentProjectHandle, clip.cachePath)
-          const fileUrl = await window.electronAPI.getFileUrlDirect(filePath)
-          if (fileUrl) {
-            cachedVideoSources.set(clip.id, fileUrl)
+          const url = await platform.resolveCacheUrl(clip)
+          if (url) {
+            cachedVideoSources.set(clip.id, url)
           }
         } catch (err) {
           console.warn('Failed to load cached render for export:', err)
@@ -916,15 +872,14 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
     }
   }
   
-  const projectHandle = projectState.currentProjectHandle
   const resolvedAssetUrls = new Map()
   for (const clip of [...videoClips, ...imageClips]) {
     const asset = assetsState.getAssetById(clip.assetId)
     if (!asset?.url) continue
     const proxyUrl = clip.type === 'video' && useProxyMedia
-      ? await getExportProxyUrl(asset, projectHandle)
+      ? await platform.resolveProxyUrl(asset)
       : null
-    const resolvedUrl = proxyUrl || await getExportAssetUrl(asset, projectHandle)
+    const resolvedUrl = proxyUrl || await platform.resolveAssetUrl(asset)
     if (!resolvedUrl) continue
     resolvedAssetUrls.set(clip.assetId, resolvedUrl)
     if (clip.type === 'video') {
@@ -970,7 +925,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
 
   if (canUseDirectFramePipe) {
     onProgress({ status: 'Starting fast FFmpeg pipe...', progress: 4 })
-    const pipeStart = await window.electronAPI.startFramePipe({
+    const pipeResult = await platform.startFramePipe({
       width,
       height,
       fps,
@@ -987,12 +942,12 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
       bitrateKbps,
       keyframeInterval,
     })
-    if (pipeStart?.success && pipeStart.sessionId) {
-      framePipeSessionId = pipeStart.sessionId
-      framePipeEncoderUsed = pipeStart.encoderUsed || null
+    if (pipeResult?.sessionId) {
+      framePipeSessionId = pipeResult.sessionId
+      framePipeEncoderUsed = pipeResult.encoderUsed || null
       console.log(`Export frame pipe started with: ${framePipeEncoderUsed || 'unknown encoder'}`)
     } else {
-      console.warn('[Export] Fast FFmpeg pipe unavailable; falling back to PNG frame sequence:', pipeStart?.error)
+      console.warn('[Export] Fast FFmpeg pipe unavailable; falling back to PNG frame sequence:', pipeResult?.error)
       onProgress({ status: 'Fast pipe unavailable - using PNG frame sequence...', progress: 4 })
     }
   }
@@ -1590,15 +1545,14 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
       const frameBuffer = pixelData.byteOffset === 0 && pixelData.byteLength === pixelData.buffer.byteLength
         ? pixelData.buffer
         : pixelData.buffer.slice(pixelData.byteOffset, pixelData.byteOffset + pixelData.byteLength)
-      const writeResult = await window.electronAPI.writeFrameToPipe(framePipeSessionId, frameBuffer)
-      if (!writeResult?.success) {
-        throw new Error(writeResult?.error || 'Failed to write frame to FFmpeg pipe.')
+      const writeOk = await platform.writeFrameToPipe(framePipeSessionId, frameBuffer)
+      if (!writeOk) {
+        throw new Error('Failed to write frame to FFmpeg pipe.')
       }
     } else {
       const frameBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
       const frameBuffer = await frameBlob.arrayBuffer()
-      const framePath = await window.electronAPI.pathJoin(framesFolder, `frame_${formatFrameNumber(frameIndex + 1)}.png`)
-      await window.electronAPI.writeFileFromArrayBuffer(framePath, frameBuffer)
+      await platform.writeFrameAsPng(framesFolder, frameIndex, frameBuffer)
     }
     
     if (frameIndex % 5 === 0) {
@@ -1616,11 +1570,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
   }
   } catch (err) {
     if (framePipeSessionId) {
-      try {
-        await window.electronAPI.abortFramePipe(framePipeSessionId)
-      } catch {
-        // ignore abort errors
-      }
+      await platform.abortFramePipe(framePipeSessionId)
       framePipeSessionId = null
     }
     throw err
@@ -1628,16 +1578,12 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
 
   if (framePipeSessionId) {
     if (signal?.aborted) {
-      try {
-        await window.electronAPI.abortFramePipe(framePipeSessionId)
-      } catch {
-        // ignore abort errors
-      }
+      await platform.abortFramePipe(framePipeSessionId)
       framePipeSessionId = null
       throw new Error('Export cancelled')
     }
     onProgress({ status: 'Finalizing fast FFmpeg pipe...', progress: 78 })
-    const pipeFinish = await window.electronAPI.finishFramePipe(framePipeSessionId)
+    const pipeFinish = await platform.finishFramePipe(framePipeSessionId)
     framePipeSessionId = null
     if (!pipeFinish?.success) {
       throw new Error(pipeFinish?.error || 'Failed to finish FFmpeg frame pipe.')
@@ -1662,68 +1608,57 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
       const activeTrackIds = new Set(activeTracks.map(track => track.id))
       const eligibleAudioClips = audioClips.filter(clip => activeTrackIds.has(clip.trackId))
 
-      // Preferred path: mix in main process with FFmpeg (avoids renderer OfflineAudioContext hangs).
-      if (window.electronAPI?.mixAudio && eligibleAudioClips.length > 0) {
-        let ffmpegMixHeartbeat = null
-        try {
-          updateAudioStatus('Preparing FFmpeg audio mix…', 82)
-          ffmpegMixHeartbeat = setInterval(() => {
-            updateAudioStatus('Mixing audio…', 86)
-          }, 5000)
-          const mixResult = await window.electronAPI.mixAudio({
-            projectPath: projectHandle,
-            outputPath: audioPath,
-            rangeStart,
-            rangeEnd,
-            sampleRate,
-            channels: channelCount,
-            timeoutMs: AUDIO_MIX_TIMEOUT_MS,
-            clips: eligibleAudioClips.map(clip => ({
-              id: clip.id,
-              assetId: clip.assetId,
-              trackId: clip.trackId,
-              type: clip.type,
-              startTime: clip.startTime,
-              duration: clip.duration,
-              trimStart: clip.trimStart || 0,
-              sourceTimeScale: clip.sourceTimeScale,
-              timelineFps: clip.timelineFps,
-              sourceFps: clip.sourceFps,
-              speed: clip.speed,
-              reverse: clip.reverse,
-              gainDb: normalizeAudioClipGainDb(clip.gainDb),
-              fadeIn: clip.fadeIn ?? 0,
-              fadeOut: clip.fadeOut ?? 0,
-              url: clip.url || null,
+      // Preferred path: mix via platform (Electron FFmpeg IPC, or fallback)
+      if (eligibleAudioClips.length > 0) {
+        const mixResult = await platform.mixAudio({
+          projectPath: projectHandle,
+          outputPath: audioPath,
+          rangeStart,
+          rangeEnd,
+          sampleRate,
+          channels: channelCount,
+          timeoutMs: AUDIO_MIX_TIMEOUT_MS,
+          clips: eligibleAudioClips.map(clip => ({
+            id: clip.id,
+            assetId: clip.assetId,
+            trackId: clip.trackId,
+            type: clip.type,
+            startTime: clip.startTime,
+            duration: clip.duration,
+            trimStart: clip.trimStart || 0,
+            sourceTimeScale: clip.sourceTimeScale,
+            timelineFps: clip.timelineFps,
+            sourceFps: clip.sourceFps,
+            speed: clip.speed,
+            reverse: clip.reverse,
+            gainDb: normalizeAudioClipGainDb(clip.gainDb),
+            fadeIn: clip.fadeIn ?? 0,
+            fadeOut: clip.fadeOut ?? 0,
+            url: clip.url || null,
+          })),
+          tracks: timelineState.tracks
+            .filter(track => track.type === 'audio')
+            .map(track => ({
+              id: track.id,
+              type: track.type,
+              muted: !!track.muted,
+              visible: track.visible !== false,
+              channels: track.channels || 'stereo',
+              volume: track.volume ?? 100,
             })),
-            tracks: timelineState.tracks
-              .filter(track => track.type === 'audio')
-              .map(track => ({
-                id: track.id,
-                type: track.type,
-                muted: !!track.muted,
-                visible: track.visible !== false,
-                channels: track.channels || 'stereo',
-                volume: track.volume ?? 100,
-              })),
-            assets: assetsState.assets
-              .map(asset => ({
-                id: asset.id,
-                type: asset.type,
-                path: asset.path || null,
-                url: asset.url || null,
-              })),
-          })
-          if (ffmpegMixHeartbeat) clearInterval(ffmpegMixHeartbeat)
-          if (mixResult?.success) {
-            audioFilePath = audioPath
-            updateAudioStatus('Audio mix complete', 89)
-          } else {
-            throw new Error(mixResult?.error || 'FFmpeg audio mix failed')
-          }
-        } catch (err) {
-          if (ffmpegMixHeartbeat) clearInterval(ffmpegMixHeartbeat)
-          console.warn('FFmpeg audio mix failed, falling back to WebAudio mix:', err)
+          assets: assetsState.assets
+            .map(asset => ({
+              id: asset.id,
+              type: asset.type,
+              path: asset.path || null,
+              url: asset.url || null,
+            })),
+        })
+        if (mixResult?.success) {
+          audioFilePath = audioPath
+          updateAudioStatus('Audio mix complete', 89)
+        } else {
+          console.warn('Platform audio mix failed, falling back to WebAudio mix:', mixResult?.error)
           audioFilePath = null
         }
       }
@@ -1743,7 +1678,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
           if (!asset?.url) continue
           let audioUrl = resolvedAudioUrlCache.get(asset.id)
           if (!audioUrl) {
-            audioUrl = await getExportAssetUrl(asset, projectHandle) || asset.url
+            audioUrl = await platform.resolveAssetUrl(asset) || asset.url
             resolvedAudioUrlCache.set(asset.id, audioUrl)
           }
           try {
@@ -1863,8 +1798,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
           if (renderHeartbeat) clearInterval(renderHeartbeat)
           updateAudioStatus('Writing WAV…', 88)
           const wavData = audioBufferToWav(mixedBuffer)
-          await window.electronAPI.writeFileFromArrayBuffer(audioPath, wavData)
-          audioFilePath = audioPath
+          audioFilePath = await platform.writeAudioWav(tempFolder, wavData)
           updateAudioStatus('Audio mix complete', 89)
         } catch (err) {
           if (renderHeartbeat) clearInterval(renderHeartbeat)
@@ -1885,7 +1819,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
   if (framePipeEncoderUsed) {
     if (audioFilePath && pipedVideoPath !== outputPath) {
       onProgress({ status: 'Muxing fast-pipe video with audio...', progress: 92 })
-      const muxResult = await window.electronAPI.muxAudioVideo({
+      const muxResult = await platform.muxAudioVideo({
         videoPath: pipedVideoPath,
         audioPath: audioFilePath,
         outputPath,
@@ -1899,14 +1833,14 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
         throw new Error(muxResult?.error || 'Failed to mux audio onto fast-pipe export.')
       }
     } else if (pipedVideoPath !== outputPath) {
-      const copyResult = await window.electronAPI.copyFile(pipedVideoPath, outputPath)
+      const copyResult = await platform.copyFile(pipedVideoPath, outputPath)
       if (!copyResult?.success) {
         throw new Error(copyResult?.error || 'Failed to copy fast-pipe export to output path.')
       }
     }
     encodeResult = { success: true, encoderUsed: framePipeEncoderUsed }
   } else {
-    encodeResult = await window.electronAPI.encodeVideo({
+    encodeResult = await platform.encodeVideo({
       framePattern,
       fps,
       outputPath,
@@ -1940,7 +1874,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
     console.log('[Export] Keeping temp frame folder for diagnostics:', tempFolder)
   } else {
     try {
-      await window.electronAPI.deleteDirectory(tempFolder, { recursive: true })
+      await platform.cleanup(tempFolder)
     } catch (err) {
       console.warn('Failed to clean export temp folder:', err)
     }

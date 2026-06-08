@@ -387,7 +387,7 @@ export default function WorkflowFieldRenderer({ field, workflow, values, actions
       <div className="space-y-1.5">
         {commonLabel}
         <Segmented
-          options={[24, 30].map((fps) => ({ label: `${fps}`, value: fps }))}
+          options={[24, 25, 30].map((fps) => ({ label: `${fps}`, value: fps }))}
           value={values.fps}
           onChange={(value) => actions.setValue('fps', Number(value))}
         />

@@ -3263,6 +3263,7 @@ export default function FlowAIWorkspace({ onOpenWorkflowSetup }) {
                           >
                             <option value={16}>16 fps</option>
                             <option value={24}>24 fps</option>
+                            <option value={25}>25 fps (PAL)</option>
                             <option value={30}>30 fps</option>
                           </select>
                         </InspectorRow>

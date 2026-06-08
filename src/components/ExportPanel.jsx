@@ -340,7 +340,7 @@ function ExportPanel() {
     
     const checkNvenc = async () => {
       if (!window.electronAPI?.checkNvenc) {
-        setNvencStatus({ checked: true, available: false, h264: false, h265: false, gpuName: null, error: 'NVENC check unavailable' })
+        setNvencStatus({ checked: true, available: false, h264: false, h265: false, gpuName: null, error: 'NVENC not available in browser mode' })
         return
       }
       try {
@@ -374,7 +374,7 @@ function ExportPanel() {
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.electronAPI?.onExportProgress) return
+    if (!window.electronAPI?.onExportProgress) return
     const onProgress = (data) => {
       setExportStatus(data.status || '')
       if (typeof data.progress === 'number') setExportProgress(data.progress)

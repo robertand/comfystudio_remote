@@ -11511,6 +11511,7 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
                       className="mt-1 w-full bg-sf-dark-800 border border-sf-dark-600 rounded px-2 py-1 text-xs text-sf-text-primary"
                     >
                       <option value={24}>24 fps</option>
+                      <option value={25}>25 fps</option>
                       <option value={30}>30 fps</option>
                     </select>
                   </div>
