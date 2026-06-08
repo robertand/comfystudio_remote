@@ -408,6 +408,8 @@ function createWebPlatform(projectHandle) {
       }
 
       // Server encoding path
+      if (!sessionId) return { success: false, error: 'No export session — use WebCodecs or server mode' }
+
       try {
         const res = await fetch(`${EXPORT_API}/encode`, {
           method: 'POST',
@@ -415,8 +417,10 @@ function createWebPlatform(projectHandle) {
           body: JSON.stringify({ sessionId, ...opts }),
         })
         if (!res.ok) {
-          const err = await res.json()
-          throw new Error(err.error || `Server encode failed (${res.status})`)
+          const text = await res.text()
+          let msg
+          try { msg = JSON.parse(text).error || text } catch { msg = text }
+          throw new Error(msg || `Server encode failed (${res.status})`)
         }
         const blob = await res.blob()
         const ext = opts.format || 'mp4'
