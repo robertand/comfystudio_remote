@@ -279,18 +279,24 @@ function comfyProxyPlugin() {
              return
            }
 
-           const mUploadFrame = p.match(/^\/upload-frame\/([^/]+)\/(\d+)$/)
-           if (mUploadFrame && req.method === 'POST') {
-             const [, sid, idx] = mUploadFrame
-             const s = exportSessions.get(sid)
-             if (!s) { res.writeHead(404); res.end('Session not found'); return }
-             const buf = await bodyBuffer(req)
-             const name = `frame_${String(parseInt(idx) + 1).padStart(6, '0')}.png`
-             fs.writeFileSync(path.join(s.dir, 'frames', name), buf)
-             res.writeHead(200, { 'Content-Type': 'application/json' })
-             res.end(JSON.stringify({ ok: true }))
-             return
-           }
+            const mUploadFrame = p.match(/^\/upload-frame\/([^/]+)\/(\d+)$/)
+            if (mUploadFrame && req.method === 'POST') {
+              const [, sid, idx] = mUploadFrame
+              const s = exportSessions.get(sid)
+              if (!s) { res.writeHead(404); res.end('Session not found'); return }
+              const buf = await bodyBuffer(req)
+              // Detect image format from magic bytes
+              let frameExt = 'png'
+              if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) frameExt = 'jpg'
+              else if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E) frameExt = 'png'
+              else if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46) frameExt = 'webp' // RIFF header
+              const name = `frame_${String(parseInt(idx) + 1).padStart(6, '0')}.${frameExt}`
+              s.frameExt = frameExt
+              fs.writeFileSync(path.join(s.dir, 'frames', name), buf)
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: true, ext: frameExt }))
+              return
+            }
 
            const mUploadAudio = p.match(/^\/upload-audio\/([^/]+)$/)
            if (mUploadAudio && req.method === 'POST') {
@@ -314,7 +320,9 @@ function comfyProxyPlugin() {
 
              const ext = params.format || 'mp4'
              const outputPath = path.join(s.dir, `output.${ext}`)
-             const framePattern = path.join(s.dir, 'frames', 'frame_%06d.png')
+             const frameDir = path.join(s.dir, 'frames')
+             const frameExt = s.frameExt || 'png'
+             const framePattern = path.join(frameDir, `frame_%06d.${frameExt}`)
              const args = ['-framerate', String(params.fps), '-i', framePattern]
 
              if (s.audioPath && params.includeAudio !== false) {
