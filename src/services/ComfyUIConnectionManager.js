@@ -556,15 +556,16 @@ class ComfyUIConnectionManager {
 
     // Strategy: try multiple URL patterns
     const urlsToTry = []
-
-    // 1. Direct URL
     const directUrl = normalizeUrl(config).http
-    urlsToTry.push(directUrl)
+    const usingProxy = this.isUsingProxy() && typeof window !== 'undefined'
 
-    // 2. Proxy URL (when in browser, the Vite /comfy/ proxy or a CORS proxy)
-    if (this.isUsingProxy() && typeof window !== 'undefined') {
+    if (usingProxy) {
+      // Behind Vite proxy — only the proxy URL works (direct URL is CORS-blocked)
       const prefix = this.getProxyPrefix()
       urlsToTry.push(`${window.location.origin}${prefix}`)
+    } else {
+      // Direct URL (localhost or same-origin)
+      urlsToTry.push(directUrl)
     }
 
     for (const baseUrl of urlsToTry) {
