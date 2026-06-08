@@ -196,41 +196,67 @@ function getJpegQuality() {
 
 async function encodeViaWebCodecs(canvas, frameIndex) {
   const cfg = _wcConfig || {}
+  const fps = cfg.fps || 30
 
   if (!_wcEncoder) {
-    const { Muxer } = await import('mp4-muxer')
-    _wcMuxerClass = Muxer
+    try {
+      const { Muxer } = await import('mp4-muxer')
+      _wcMuxerClass = Muxer
+    } catch (err) {
+      console.error('WebCodecs init: failed to load mp4-muxer', err)
+      // Fall back to a server mode
+      _wcEncoder = 'FAILED'
+      throw new Error(`mp4-muxer import failed: ${err.message}`)
+    }
 
     const w = canvas.width, h = canvas.height
-    _wcMuxer = new Muxer({
-      fastStart: 'in-memory',
-      video: { width: w, height: h, codec: 'avc1.42001E' },
-    })
 
-    _wcEncoder = new VideoEncoder({
-      output: (chunk, meta) => _wcMuxer.addVideoChunk(chunk, meta),
-      error: (e) => console.error('VideoEncoder error:', e),
-    })
-    _wcEncoder.configure({
-      codec: 'avc1.42001E',
-      width: w,
-      height: h,
-      bitrate: (cfg.bitrateKbps || 5000) * 1000,
-      framerate: cfg.fps || 30,
-    })
+    try {
+      _wcMuxer = new (_wcMuxerClass)({
+        fastStart: 'in-memory',
+        video: { width: w, height: h, codec: 'avc1.42001E' },
+      })
+    } catch (err) {
+      _wcEncoder = 'FAILED'
+      throw new Error(`Muxer creation failed: ${err.message}`)
+    }
+
+    try {
+      _wcEncoder = new VideoEncoder({
+        output: (chunk, meta) => _wcMuxer.addVideoChunk(chunk, meta),
+        error: (e) => console.error('VideoEncoder error:', e),
+      })
+      _wcEncoder.configure({
+        codec: 'avc1.42001E',
+        width: w,
+        height: h,
+        bitrate: (cfg.bitrateKbps || 5000) * 1000,
+        framerate: fps,
+      })
+    } catch (err) {
+      // Cleanup on failure
+      try { _wcEncoder?.close() } catch {}
+      _wcEncoder = 'FAILED'
+      throw new Error(`VideoEncoder init failed: ${err.message}`)
+    }
     _wcFrameIndex = 0
   }
 
-  const ctx = canvas.getContext('2d')
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  const fps = cfg.fps || 30
-  const frame = new VideoFrame(imageData, {
-    timestamp: _wcFrameIndex * 1e6 / fps,
-    duration: 1e6 / fps,
-  })
-  _wcEncoder.encodeFrame(frame)
-  frame.close()
-  _wcFrameIndex++
+  if (_wcEncoder === 'FAILED') return
+
+  try {
+    const ctx = canvas.getContext('2d')
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const frame = new VideoFrame(imageData, {
+      timestamp: _wcFrameIndex * 1e6 / fps,
+      duration: 1e6 / fps,
+    })
+    _wcEncoder.encodeFrame(frame)
+    frame.close()
+    _wcFrameIndex++
+  } catch (err) {
+    throw new Error(`VideoFrame/encode error: ${err.message}`)
+  }
 }
 
 function createWebPlatform(projectHandle) {
@@ -380,6 +406,10 @@ function createWebPlatform(projectHandle) {
 
     async encodeVideo(opts) {
       // WebCodecs path: finalize encoder + muxer and save
+      if (_wcEncoder === 'FAILED') {
+        _wcEncoder = null; _wcMuxer = null; _wcConfig = null; _wcFrameIndex = 0
+        return { success: false, error: 'WebCodecs encoder failed to initialize' }
+      }
       if (_wcMuxer) {
         try {
           await _wcEncoder.flush()
