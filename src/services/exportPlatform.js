@@ -195,8 +195,7 @@ function getJpegQuality() {
 }
 
 async function encodeViaWebCodecs(canvas, frameIndex) {
-  const cfg = _wcConfig
-  if (!cfg) return
+  const cfg = _wcConfig || {}
 
   if (!_wcEncoder) {
     const { Muxer } = await import('mp4-muxer')
@@ -294,10 +293,11 @@ function createWebPlatform(projectHandle) {
 
     async abortFramePipe() {},
 
-    async writeFrame(canvas, _dirHandle, index) {
+    async writeFrame(canvas, _dirHandle, index, fps) {
       const mode = getExportMode()
 
       if (mode === 'webcodecs-mp4') {
+        if (!_wcConfig) _wcConfig = { fps: fps || 30, bitrateKbps: 5000 }
         await encodeViaWebCodecs(canvas, index)
         return
       }
