@@ -70,10 +70,20 @@ function createElectronPlatform(projectHandle) {
       try { await api.abortFramePipe(sessionId) } catch {}
     },
 
+    async writeFrame(canvas, _dirHandle, index) {
+      const buffer = await new Promise(resolve =>
+        canvas.toBlob(b => b.arrayBuffer().then(resolve), 'image/png')
+      )
+      const framePath = await api.pathJoin(_dirHandle, `frame_${String(index + 1).padStart(6, '0')}.png`)
+      await api.writeFileFromArrayBuffer(framePath, buffer)
+    },
+
     async writeFrameAsPng(dirHandle, index, buffer) {
       const framePath = await api.pathJoin(dirHandle, `frame_${String(index + 1).padStart(6, '0')}.png`)
       await api.writeFileFromArrayBuffer(framePath, buffer)
     },
+
+    async flushFrames() {},
 
     getFramePattern(framesFolder) {
       return api.pathJoin(framesFolder, 'frame_%06d.png')
@@ -163,8 +173,19 @@ let _saveFilename = null
 
 const MIME = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' }
 
+const BATCH_SIZE = 20
+
+function getExportMode() {
+  try { return localStorage.getItem('exportEncoding') || 'png-single' } catch { return 'png-single' }
+}
+
+function getWebpQuality() {
+  try { return parseFloat(localStorage.getItem('exportWebpQuality')) || 0.9 } catch { return 0.9 }
+}
+
 function createWebPlatform(projectHandle) {
   let sessionId = null
+  let frameBatch = []
 
   return {
     type: 'web',
@@ -213,6 +234,44 @@ function createWebPlatform(projectHandle) {
     async finishFramePipe() { return null },
 
     async abortFramePipe() {},
+
+    async writeFrame(canvas, _dirHandle, index) {
+      const mode = getExportMode()
+
+      if (mode === 'webp-batch') {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', getWebpQuality()))
+        frameBatch.push({ index, blob })
+        if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
+        return
+      }
+
+      if (mode === 'webp-single') {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', getWebpQuality()))
+        await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
+          method: 'POST',
+          body: await blob.arrayBuffer(),
+        })
+        return
+      }
+
+      // png-single (default)
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
+        method: 'POST',
+        body: await blob.arrayBuffer(),
+      })
+    },
+
+    async flushFrames() {
+      if (frameBatch.length === 0) return
+      const batch = frameBatch
+      frameBatch = []
+      await Promise.all(batch.map(({ index, blob }) =>
+        blob.arrayBuffer().then(buf =>
+          fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, { method: 'POST', body: buf })
+        )
+      ))
+    },
 
     async writeFrameAsPng(_dirHandle, index, buffer) {
       await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {

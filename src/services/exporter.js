@@ -1550,9 +1550,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
         throw new Error('Failed to write frame to FFmpeg pipe.')
       }
     } else {
-      const frameBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
-      const frameBuffer = await frameBlob.arrayBuffer()
-      await platform.writeFrameAsPng(framesFolder, frameIndex, frameBuffer)
+      await platform.writeFrame(canvas, framesFolder, frameIndex)
     }
     
     if (frameIndex % 5 === 0) {
@@ -1840,6 +1838,9 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
     }
     encodeResult = { success: true, encoderUsed: framePipeEncoderUsed }
   } else {
+    if (typeof platform.flushFrames === 'function') {
+      await platform.flushFrames()
+    }
     encodeResult = await platform.encodeVideo({
       framePattern,
       fps,
