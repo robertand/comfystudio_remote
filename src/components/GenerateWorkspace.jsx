@@ -3538,12 +3538,26 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
   const handleWorkflowManifestSelect = useCallback((manifest) => {
     if (!manifest) return
 
-    // Imported workflows open directly in ComfyUI tab
+    // Imported workflows: load from store and set up as a custom video workflow
     if (manifest.importedWorkflow) {
-      useWorkflowsStore.getState().getImportedWorkflowJson(manifest.id).then(json => {
-        openApiWorkflowInComfyUi(json, { label: manifest.title || 'Imported workflow' })
+      setCustomWorkflowBridgeTarget('generate-video')
+      useWorkflowsStore.getState().getImportedWorkflowJson(manifest.id).then(async (json) => {
+        const validation = validateCustomVideoWorkflow(json, { requireInputImage: false })
+        const nextState = {
+          name: manifest.title || 'Imported workflow',
+          jsonText: JSON.stringify(json, null, 2),
+          updatedAt: Date.now(),
+        }
+        setCustomGenerateVideoWorkflow(nextState)
+        selectGenerateCustomWorkflow('video')
+        const btnEl = document.querySelector('[data-custom-import-json-btn]')
+        setFormError(validation.ok ? null : validation.message)
+        addComfyLog(validation.ok ? 'ok' : 'warning', validation.ok
+          ? `Loaded imported workflow: ${manifest.title}`
+          : `Imported workflow loaded but is not ready: ${validation.message}`)
       }).catch(err => {
         setFormError(err.message || 'Failed to load imported workflow')
+        addComfyLog('error', err.message || 'Failed to load imported workflow')
       })
       return
     }
