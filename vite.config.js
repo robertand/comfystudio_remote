@@ -70,11 +70,13 @@ function rewriteHtml(body, prefix) {
   html = html.replace(/(@import\s+)'\/(?!\/)/gi, `$1'${prefix}/`)
   html = html.replace('</head>', `<base href="${prefix}/">
 <script>
-(function(){const p='${prefix}';const ap=['/system_stats','/prompt','/history','/queue','/interrupt','/view','/upload','/workflow_templates','/extensions','/object_info','/api/','/manager/','/static/','/media/','/assets/'];
+(function(){const p='${prefix}';const ap=['/ws','/system_stats','/prompt','/history','/queue','/interrupt','/view','/upload','/workflow_templates','/extensions','/object_info','/api/','/manager/','/static/','/media/','/assets/'];
 const of=window.fetch;window.fetch=function(u,o){if(typeof u==='string'){for(let i=0;i<ap.length;i++){if(u.startsWith(ap[i])&&!u.startsWith(p)){u=p+u;break}}}
 return of.call(this,u,o)};
 const ox=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u,a,us,pw){let nu=u;if(typeof u==='string'){for(let i=0;i<ap.length;i++){if(u.startsWith(ap[i])&&!u.startsWith(p)){nu=p+u;break}}}
 return ox.call(this,m,nu,a,us,pw)};
+const ow=window.WebSocket;window.WebSocket=function(u,p){let nu=u;if(typeof u==='string'){for(let i=0;i<ap.length;i++){if(u.startsWith(ap[i])&&!u.startsWith(p)){nu=p+u;break}}}
+return new ow(nu,p)};
 })();
 </script>
 </head>`)
