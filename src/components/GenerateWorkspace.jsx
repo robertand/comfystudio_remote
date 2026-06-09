@@ -3538,26 +3538,27 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
   const handleWorkflowManifestSelect = useCallback((manifest) => {
     if (!manifest) return
 
-    // Imported workflows: load from store and set up as a custom video workflow
+    // Imported workflows: try to set up in pipeline, fall back to opening in ComfyUI tab
     if (manifest.importedWorkflow) {
-      setCustomWorkflowBridgeTarget('generate-video')
       useWorkflowsStore.getState().getImportedWorkflowJson(manifest.id).then(async (json) => {
         const validation = validateCustomVideoWorkflow(json, { requireInputImage: false })
-        const nextState = {
-          name: manifest.title || 'Imported workflow',
-          jsonText: JSON.stringify(json, null, 2),
-          updatedAt: Date.now(),
+        if (validation.ok) {
+          // Pipeline-ready: set up as custom video workflow
+          setCustomGenerateVideoWorkflow({
+            name: manifest.title || 'Imported workflow',
+            jsonText: JSON.stringify(json, null, 2),
+            updatedAt: Date.now(),
+          })
+          selectGenerateCustomWorkflow('video')
+          setFormError(null)
+          addComfyLog('ok', `Loaded imported workflow: ${manifest.title}`)
+        } else {
+          // Not pipeline-ready: open in ComfyUI tab for review/editing
+          setFormError(`This workflow is missing required ComfyStudio nodes. Add COMFYSTUDIO_PROMPT and COMFYSTUDIO_OUTPUT_VIDEO (with _meta.title) to use in the pipeline. Opening in ComfyUI tab for now.`)
+          openApiWorkflowInComfyUi(json, { label: manifest.title || 'Imported workflow' })
         }
-        setCustomGenerateVideoWorkflow(nextState)
-        selectGenerateCustomWorkflow('video')
-        const btnEl = document.querySelector('[data-custom-import-json-btn]')
-        setFormError(validation.ok ? null : validation.message)
-        addComfyLog(validation.ok ? 'ok' : 'warning', validation.ok
-          ? `Loaded imported workflow: ${manifest.title}`
-          : `Imported workflow loaded but is not ready: ${validation.message}`)
       }).catch(err => {
         setFormError(err.message || 'Failed to load imported workflow')
-        addComfyLog('error', err.message || 'Failed to load imported workflow')
       })
       return
     }
