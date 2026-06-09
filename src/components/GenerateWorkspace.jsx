@@ -3540,10 +3540,12 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
 
     // Imported workflows: try to set up in pipeline, fall back to opening in ComfyUI tab
     if (manifest.importedWorkflow) {
+      setSelectedWorkflowManifestId(manifest.id)
+      setWorkflowRoute(manifest.route || 'custom')
+      setWorkflowDetailOpen(true)
       useWorkflowsStore.getState().getImportedWorkflowJson(manifest.id).then(async (json) => {
         const validation = validateCustomVideoWorkflow(json, { requireInputImage: false })
         if (validation.ok) {
-          // Pipeline-ready: set up as custom video workflow
           setCustomGenerateVideoWorkflow({
             name: manifest.title || 'Imported workflow',
             jsonText: JSON.stringify(json, null, 2),
@@ -3553,8 +3555,7 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
           setFormError(null)
           addComfyLog('ok', `Loaded imported workflow: ${manifest.title}`)
         } else {
-          // Not pipeline-ready: open in ComfyUI tab for review/editing
-          setFormError(`This workflow is missing required ComfyStudio nodes. Add COMFYSTUDIO_PROMPT and COMFYSTUDIO_OUTPUT_VIDEO (with _meta.title) to use in the pipeline. Opening in ComfyUI tab for now.`)
+          addComfyLog('warning', `Imported workflow needs: ${validation.message}. Opening in ComfyUI tab.`)
           openApiWorkflowInComfyUi(json, { label: manifest.title || 'Imported workflow' })
         }
       }).catch(err => {
