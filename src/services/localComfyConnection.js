@@ -82,6 +82,13 @@ export function getCachedProxyInfo() {
   return null
 }
 
+export function isLoopbackHttpUrl(url) {
+  try {
+    const u = new URL(url)
+    return u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '::1'
+  } catch { return false }
+}
+
 export async function refreshProxyInfo() {
   /* no-op in browser mode */
 }

@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { 
   FolderOpen, Settings, Type, SlidersHorizontal,
-  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeft
+  ChevronLeft, ChevronRight, PanelLeftClose, PanelLeft, Workflow
 } from 'lucide-react'
 import AssetsPanel from './panels/AssetsPanel'
 import TextPanel from './panels/TextPanel'
 import EffectsPanel from './panels/EffectsPanel'
+import WorkflowsPanel from './panels/WorkflowsPanel'
 
 function LeftPanel({ isActive = true, isExpanded, onToggleExpanded, activeTab, onTabChange, isFullHeight = false, onToggleFullHeight, onSettingsClick }) {
   const tabs = [
     { id: 'assets', label: 'Assets', icon: FolderOpen },
     { id: 'text', label: 'Text', icon: Type },
     { id: 'effects', label: 'Effects', icon: SlidersHorizontal },
+    { id: 'workflows', label: 'Workflows', icon: Workflow },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
 
@@ -39,6 +41,8 @@ function LeftPanel({ isActive = true, isExpanded, onToggleExpanded, activeTab, o
         return <TextPanel />
       case 'effects':
         return <EffectsPanel />
+      case 'workflows':
+        return <WorkflowsPanel />
       case 'assets':
         return <AssetsPanel isActive={isActive} />
       default:

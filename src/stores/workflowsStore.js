@@ -27,6 +27,10 @@ const getWorkflowsDir = async () => {
   return pathJoin(userData, 'workflows')
 }
 
+const IMPORTED_STORAGE_KEY = STORAGE_KEY + '-imported-v2'
+
+let _importedIdCounter = 0
+
 const useWorkflowsStore = create(
   persist(
     (set, get) => ({
@@ -34,6 +38,8 @@ const useWorkflowsStore = create(
       downloadedIds: [],
       // ComfyUI templates downloaded from running ComfyUI instance
       downloadedComfyIds: [],
+      // IDs of user-imported workflows
+      importedIds: [],
 
       /** Check if a workflow is installed (built-in or downloaded) */
       isInstalled: (workflowId) => {
@@ -48,6 +54,93 @@ const useWorkflowsStore = create(
       getInstalledIds: () => {
         const { downloadedIds } = get()
         return [...BUILTIN_WORKFLOWS.map(w => w.id), ...downloadedIds]
+      },
+
+      /** Get list of imported workflow metadata (id, name, importedAt) */
+      getImportedWorkflows: () => {
+        const stored = JSON.parse(localStorage.getItem(IMPORTED_STORAGE_KEY) || '{}')
+        return Object.entries(stored).map(([id, meta]) => ({
+          id,
+          name: meta.name || 'Unnamed Workflow',
+          importedAt: meta.importedAt || 0,
+          nodeCount: meta.nodeCount,
+        })).sort((a, b) => b.importedAt - a.importedAt)
+      },
+
+      /** Import a workflow from a parsed JSON object */
+      importWorkflow: async (json, filename) => {
+        const id = `imported-${Date.now()}-${_importedIdCounter++}`
+        const name = filename
+          ? filename.replace(/\.json$/i, '').replace(/[_]/g, ' ')
+          : `Workflow ${new Date().toLocaleDateString()}`
+        const nodeCount = json?.nodes?.length
+
+        if (isElectron()) {
+          const dir = await getWorkflowsDir()
+          if (dir) {
+            const { createDirectory, writeFile, pathJoin } = window.electronAPI
+            await createDirectory(pathJoin(dir, 'imported'), { recursive: true })
+            const destPath = await pathJoin(dir, 'imported', `${id}.json`)
+            const writeResult = await writeFile(destPath, json)
+            if (writeResult?.success === false) throw new Error(writeResult.error || 'Failed to write workflow')
+          }
+        }
+
+        // Store metadata (name, etc.) in localStorage for both platforms
+        const stored = JSON.parse(localStorage.getItem(IMPORTED_STORAGE_KEY) || '{}')
+        stored[id] = { name, importedAt: Date.now(), nodeCount }
+        localStorage.setItem(IMPORTED_STORAGE_KEY, JSON.stringify(stored))
+
+        // Store JSON in localStorage for web
+        if (!isElectron()) {
+          const jsonStored = JSON.parse(localStorage.getItem(IMPORTED_STORAGE_KEY + '-json') || '{}')
+          jsonStored[id] = json
+          localStorage.setItem(IMPORTED_STORAGE_KEY + '-json', JSON.stringify(jsonStored))
+        }
+
+        set(state => ({
+          importedIds: state.importedIds.includes(id) ? state.importedIds : [...state.importedIds, id]
+        }))
+        return id
+      },
+
+      /** Remove an imported workflow */
+      removeImportedWorkflow: async (id) => {
+        if (isElectron()) {
+          const dir = await getWorkflowsDir()
+          if (dir) {
+            const { deleteFile, pathJoin } = window.electronAPI
+            try {
+              await deleteFile(pathJoin(dir, 'imported', `${id}.json`))
+            } catch {}
+          }
+        }
+        const stored = JSON.parse(localStorage.getItem(IMPORTED_STORAGE_KEY) || '{}')
+        delete stored[id]
+        localStorage.setItem(IMPORTED_STORAGE_KEY, JSON.stringify(stored))
+        if (!isElectron()) {
+          const jsonStored = JSON.parse(localStorage.getItem(IMPORTED_STORAGE_KEY + '-json') || '{}')
+          delete jsonStored[id]
+          localStorage.setItem(IMPORTED_STORAGE_KEY + '-json', JSON.stringify(jsonStored))
+        }
+        set(state => ({ importedIds: state.importedIds.filter(i => i !== id) }))
+      },
+
+      /** Get JSON for an imported workflow */
+      getImportedWorkflowJson: async (id) => {
+        if (isElectron()) {
+          const dir = await getWorkflowsDir()
+          if (!dir) throw new Error('Workflows directory not available')
+          const { readFile, pathJoin } = window.electronAPI
+          const filePath = await pathJoin(dir, 'imported', `${id}.json`)
+          const result = await readFile(filePath, { encoding: 'utf8' })
+          if (!result.success) throw new Error(result.error || 'Failed to read workflow')
+          return typeof result.data === 'string' ? JSON.parse(result.data) : result.data
+        }
+        const jsonStored = JSON.parse(localStorage.getItem(IMPORTED_STORAGE_KEY + '-json') || '{}')
+        const json = jsonStored[id]
+        if (!json) throw new Error('Imported workflow not found')
+        return json
       },
 
       /** Install (download) a workflow by ID */
@@ -194,7 +287,7 @@ const useWorkflowsStore = create(
     }),
     {
       name: STORAGE_KEY,
-      partialize: (state) => ({ downloadedIds: state.downloadedIds, downloadedComfyIds: state.downloadedComfyIds }),
+      partialize: (state) => ({ downloadedIds: state.downloadedIds, downloadedComfyIds: state.downloadedComfyIds, importedIds: state.importedIds }),
     }
   )
 )
