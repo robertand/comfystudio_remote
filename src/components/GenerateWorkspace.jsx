@@ -19,6 +19,7 @@ import useComfyUI from '../hooks/useComfyUI'
 import useAssetsStore from '../stores/assetsStore'
 import useProjectStore from '../stores/projectStore'
 import useTimelineStore from '../stores/timelineStore'
+import useWorkflowsStore from '../stores/workflowsStore'
 import { useFrameForAIStore } from '../stores/frameForAIStore'
 import { BUILTIN_WORKFLOW_PATHS } from '../config/workflowRegistry'
 import { comfyui, validateCustomKeyframeWorkflow, validateCustomVideoWorkflow } from '../services/comfyui'
@@ -3436,14 +3437,38 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
     }
   }, [currentWorkflow, formError, formErrorTroubleshootingHints, generationMode])
   const activeWorkflowBrowserMode = generationMode === 'yolo' ? 'create' : 'generate'
-  const visibleWorkflowManifests = useMemo(() => (
-    GENERATE_WORKFLOW_CATALOG.filter((workflow) => (
+  const importedWorkflowList = useWorkflowsStore(s => s.importedIds)
+  const visibleWorkflowManifests = useMemo(() => {
+    const catalog = GENERATE_WORKFLOW_CATALOG.filter((workflow) => (
       workflow.mode === activeWorkflowBrowserMode
         && (activeWorkflowBrowserMode === 'create'
           ? workflow.route === 'local'
           : workflow.route === workflowRoute)
     ))
-  ), [activeWorkflowBrowserMode, workflowRoute])
+
+    // Inject imported workflows into the Custom tab
+    if (activeWorkflowBrowserMode !== 'create' && workflowRoute === 'custom') {
+      const imported = useWorkflowsStore.getState().getImportedWorkflows()
+      imported.forEach(w => {
+        catalog.push({
+          id: w.id,
+          workflowId: w.id,
+          title: w.name,
+          subtitle: `${w.nodeCount || '?'} nodes • ${new Date(w.importedAt).toLocaleDateString()}`,
+          description: 'Imported workflow from JSON file',
+          route: 'custom',
+          mode: 'generate',
+          category: 'utility',
+          provider: 'Imported',
+          runnable: false,
+          outputType: 'video',
+          importedWorkflow: true,
+        })
+      })
+    }
+
+    return catalog
+  }, [activeWorkflowBrowserMode, workflowRoute, importedWorkflowList])
   const selectedWorkflowManifest = useMemo(() => (
     GENERATE_WORKFLOW_CATALOG.find((workflow) => workflow.id === selectedWorkflowManifestId)
       || getWorkflowManifestByWorkflowId(workflowId)
@@ -3512,6 +3537,16 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
 
   const handleWorkflowManifestSelect = useCallback((manifest) => {
     if (!manifest) return
+
+    // Imported workflows open directly in ComfyUI tab
+    if (manifest.importedWorkflow) {
+      useWorkflowsStore.getState().getImportedWorkflowJson(manifest.id).then(json => {
+        openApiWorkflowInComfyUi(json, { label: manifest.title || 'Imported workflow' })
+      }).catch(err => {
+        setFormError(err.message || 'Failed to load imported workflow')
+      })
+      return
+    }
 
     setSelectedWorkflowManifestId(manifest.id)
     setWorkflowRoute(manifest.route || 'local')
