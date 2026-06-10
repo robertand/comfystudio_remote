@@ -14,7 +14,7 @@ const isElectron = process.env.ELECTRON === 'true'
 const DEFAULT_COMFY_TARGET = process.env.VITE_COMFY_URL || 'http://127.0.0.1:8188'
 
 function getComfyTarget() {
-  const storagePath = path.resolve(__dirname, 'node_modules', '.vite-comfy-target')
+  const storagePath = path.resolve(import.meta.dirname, 'node_modules', '.vite-comfy-target')
   try {
     if (fs.existsSync(storagePath)) {
       const data = fs.readFileSync(storagePath, 'utf-8').trim()
@@ -25,7 +25,7 @@ function getComfyTarget() {
 }
 
 function setComfyTarget(url) {
-  const storagePath = path.resolve(__dirname, 'node_modules', '.vite-comfy-target')
+  const storagePath = path.resolve(import.meta.dirname, 'node_modules', '.vite-comfy-target')
   try {
     fs.writeFileSync(storagePath, url, 'utf-8')
   } catch {}
@@ -597,10 +597,10 @@ export default defineConfig({
   plugins: [react(), comfyProxyPlugin()],
   base: './',
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
   server: {
-    port: 5173,
+    port: Number(process.env.PORT) || 5173,
     allowedHosts: true,
     proxy: {
       '/ws': {
