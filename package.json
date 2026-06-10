@@ -2,15 +2,19 @@
   "name": "comfystudio",
   "version": "0.1.18",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "description": "AI-Powered Animatic Studio for Pre-Production",
   "main": "electron/main.js",
   "scripts": {
+    "start": "vite",
     "dev": "vite",
     "build": "vite build",
     "icons:generate": "icon-gen -i build/icon.png -o build --ico --ico-name icon --icns --icns-name icon",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron:dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "electron:dev": "concurrently -k \"vite --strictPort\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder",
     "electron:build:win": "npm run build && electron-builder --win",
     "electron:build:mac": "npm run build && electron-builder --mac",
