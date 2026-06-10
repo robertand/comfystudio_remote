@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { fileURLToPath } from 'url'
 import http from 'http'
 import https from 'https'
 import { WebSocket as NodeWebSocket, WebSocketServer } from 'ws'
@@ -9,6 +10,13 @@ import zlib from 'zlib'
 import os from 'os'
 import { spawn } from 'child_process'
 import crypto from 'crypto'
+
+// ESM-compatible __dirname (replaces CommonJS __dirname)
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// Configurable port: PORT env var or default 5173
+const SERVER_PORT = parseInt(process.env.PORT || '5173', 10)
 
 const isElectron = process.env.ELECTRON === 'true'
 const DEFAULT_COMFY_TARGET = process.env.VITE_COMFY_URL || 'http://127.0.0.1:8188'
@@ -541,8 +549,8 @@ function comfyProxyPlugin() {
 
         const targetUrl = getComfyTarget().replace(/\/+$/, '')
         const wsTarget = targetUrl.replace(/^http/, 'ws')
-        const path = url.replace(/^\/comfy/, '') || '/'
-        const wsUrl = `${wsTarget}${path}`
+        const wsPath = url.replace(/^\/comfy/, '') || '/'
+        const wsUrl = `${wsTarget}${wsPath}`
 
         wssBridge.handleUpgrade(req, socket, head, (browserWs) => {
           const targetWs = new NodeWebSocket(wsUrl, {
@@ -585,11 +593,9 @@ function comfyProxyPlugin() {
           })
          })
        })
-
-        // POST / PUT / DELETE /comfy/*
-     },
-   }
- }
+    },
+  }
+}
 
 const defaultProxyTarget = DEFAULT_COMFY_TARGET
 
@@ -600,7 +606,9 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, './src') },
   },
   server: {
-    port: 5173,
+    host: '0.0.0.0',
+    port: SERVER_PORT,
+    strictPort: true,
     allowedHosts: true,
     proxy: {
       '/ws': {

@@ -70,7 +70,7 @@ function createElectronPlatform(projectHandle) {
       try { await api.abortFramePipe(sessionId) } catch {}
     },
 
-    async writeFrame(canvas, _dirHandle, index) {
+    async writeFrame(canvas, _dirHandle, index, _fps, _format) {
       const buffer = await new Promise(resolve =>
         canvas.toBlob(b => b.arrayBuffer().then(resolve), 'image/png')
       )
@@ -331,25 +331,28 @@ function createWebPlatform(projectHandle) {
 
     async abortFramePipe() {},
 
-    async writeFrame(canvas, _dirHandle, index, fps) {
+    async writeFrame(canvas, _dirHandle, index, fps, format) {
       // If we have a server session, use server-based upload (not WebCodecs)
       if (sessionId) {
         const mode = getExportMode()
         const toBlob = (mime, q) => new Promise(resolve => canvas.toBlob(resolve, mime, q))
 
-        if (mode === 'webp-batch') {
+        // For PNG sequence, always upload lossless PNG frames
+        const isPngSeq = format === 'png-seq'
+
+        if (mode === 'webp-batch' && !isPngSeq) {
           const blob = await toBlob('image/webp', getWebpQuality())
           frameBatch.push({ index, blob })
           if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
           return
         }
-        if (mode === 'jpeg-batch') {
+        if (mode === 'jpeg-batch' && !isPngSeq) {
           const blob = await toBlob('image/jpeg', getJpegQuality())
           frameBatch.push({ index, blob })
           if (frameBatch.length >= BATCH_SIZE) await this.flushFrames()
           return
         }
-        if (mode === 'webp-single') {
+        if (mode === 'webp-single' && !isPngSeq) {
           const blob = await toBlob('image/webp', getWebpQuality())
           await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
             method: 'POST',
@@ -357,7 +360,7 @@ function createWebPlatform(projectHandle) {
           })
           return
         }
-        if (mode === 'jpeg-single') {
+        if (mode === 'jpeg-single' && !isPngSeq) {
           const blob = await toBlob('image/jpeg', getJpegQuality())
           await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
             method: 'POST',
@@ -365,7 +368,7 @@ function createWebPlatform(projectHandle) {
           })
           return
         }
-        // png-single (default)
+        // png-single (default, also used for png-seq)
         const blob = await toBlob('image/png')
         await fetch(`${EXPORT_API}/upload-frame/${sessionId}/${index}`, {
           method: 'POST',
