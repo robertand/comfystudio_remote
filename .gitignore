@@ -1,52 +1,30 @@
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-release/
-
-# Vite cache
-.vite/
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
 # Logs
-logs/
+logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
 
 # Editor directories and files
-.vscode/
-.idea/
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V3
-.Trashes
-ehthumbs.db
-Thumbs.db
+# Electron-builder output
+release
 
-# Electron builder output
-release/
-*.dmg
-*.exe
-*.AppImage
-*.deb
-
-# Temp export sessions (server-side)
-/tmp/comfy-export-sessions/
-
-# Vite runtime target file
-node_modules/.vite-comfy-target
+# Vite
+.vite

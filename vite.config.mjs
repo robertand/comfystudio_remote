@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { fileURLToPath } from 'url'
 import http from 'http'
 import https from 'https'
 import { WebSocket as NodeWebSocket, WebSocketServer } from 'ws'
@@ -11,18 +10,11 @@ import os from 'os'
 import { spawn } from 'child_process'
 import crypto from 'crypto'
 
-// ESM-compatible __dirname (replaces CommonJS __dirname)
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-// Configurable port: PORT env var or default 5173
-const SERVER_PORT = parseInt(process.env.PORT || '5173', 10)
-
 const isElectron = process.env.ELECTRON === 'true'
 const DEFAULT_COMFY_TARGET = process.env.VITE_COMFY_URL || 'http://127.0.0.1:8188'
 
 function getComfyTarget() {
-  const storagePath = path.resolve(__dirname, 'node_modules', '.vite-comfy-target')
+  const storagePath = path.resolve(import.meta.dirname, 'node_modules', '.vite-comfy-target')
   try {
     if (fs.existsSync(storagePath)) {
       const data = fs.readFileSync(storagePath, 'utf-8').trim()
@@ -33,7 +25,7 @@ function getComfyTarget() {
 }
 
 function setComfyTarget(url) {
-  const storagePath = path.resolve(__dirname, 'node_modules', '.vite-comfy-target')
+  const storagePath = path.resolve(import.meta.dirname, 'node_modules', '.vite-comfy-target')
   try {
     fs.writeFileSync(storagePath, url, 'utf-8')
   } catch {}
@@ -549,8 +541,8 @@ function comfyProxyPlugin() {
 
         const targetUrl = getComfyTarget().replace(/\/+$/, '')
         const wsTarget = targetUrl.replace(/^http/, 'ws')
-        const wsPath = url.replace(/^\/comfy/, '') || '/'
-        const wsUrl = `${wsTarget}${wsPath}`
+        const path = url.replace(/^\/comfy/, '') || '/'
+        const wsUrl = `${wsTarget}${path}`
 
         wssBridge.handleUpgrade(req, socket, head, (browserWs) => {
           const targetWs = new NodeWebSocket(wsUrl, {
@@ -593,9 +585,11 @@ function comfyProxyPlugin() {
           })
          })
        })
-    },
-  }
-}
+
+        // POST / PUT / DELETE /comfy/*
+     },
+   }
+ }
 
 const defaultProxyTarget = DEFAULT_COMFY_TARGET
 
@@ -603,12 +597,10 @@ export default defineConfig({
   plugins: [react(), comfyProxyPlugin()],
   base: './',
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
   server: {
-    host: '0.0.0.0',
-    port: SERVER_PORT,
-    strictPort: true,
+    port: Number(process.env.PORT) || 5173,
     allowedHosts: true,
     proxy: {
       '/ws': {
