@@ -169,7 +169,13 @@ export async function captureTimelineFrameAt(time) {
     const rendered = await renderTimelineCompositeStill(time, canvas, width, height)
     if (!rendered) return null
 
-    const blob = await new Promise((resolve) => canvas.toBlob((nextBlob) => resolve(nextBlob), 'image/png'))
+    const blob = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 10000)
+      canvas.toBlob((nextBlob) => {
+        clearTimeout(timer)
+        resolve(nextBlob)
+      }, 'image/png')
+    })
     if (!blob) return null
 
     const file = new File([blob], `timeline_frame_${Date.now()}.png`, { type: 'image/png' })

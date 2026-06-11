@@ -7,12 +7,15 @@
   },
   "description": "AI-Powered Animatic Studio for Pre-Production",
   "main": "electron/main.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
     "icons:generate": "icon-gen -i build/icon.png -o build --ico --ico-name icon --icns --icns-name icon",
-    "preview": "vite preview",
+    "preview": "vite preview --config vite.config.mjs",
     "electron": "electron .",
     "electron:dev": "concurrently -k \"vite --strictPort\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder",
