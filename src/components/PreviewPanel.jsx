@@ -1759,6 +1759,8 @@ function PreviewPanel() {
             setFrameForAI({ ...result, mode: 'extend' })
             window.dispatchEvent(new CustomEvent('comfystudio-open-generate-with-frame'))
           }
+        }).catch(() => {
+          setCapturingFrameForAI(false)
         })
         break
       }
@@ -1774,6 +1776,8 @@ function PreviewPanel() {
             setFrameForAI({ ...result, mode: 'keyframe' })
             window.dispatchEvent(new CustomEvent('comfystudio-open-generate-with-frame'))
           }
+        }).catch(() => {
+          setCapturingFrameForAI(false)
         })
         break
       }
