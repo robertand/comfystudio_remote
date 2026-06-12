@@ -6592,9 +6592,8 @@ function GenerateWorkspace({ onOpenWorkflowSetup = null }) {
       category,
       workflowId,
       workflowLabel: selectedWorkflowManifest?.title || currentWorkflow?.label || workflowId,
-      needsImage: !!(selectedWorkflowManifest?.needsImage ?? currentWorkflow?.needsImage)
-        || (customGenerateEndpoints?.inputImage != null),
-      inputAssetType: selectedWorkflowManifest?.inputAssetType || primaryAssetSlot?.assetType || (((selectedWorkflowManifest?.needsImage ?? currentWorkflow?.needsImage) || customGenerateEndpoints?.inputImage != null) ? 'image' : null),
+      needsImage: !!(selectedWorkflowManifest?.needsImage ?? currentWorkflow?.needsImage),
+      inputAssetType: selectedWorkflowManifest?.inputAssetType || primaryAssetSlot?.assetType || ((selectedWorkflowManifest?.needsImage ?? currentWorkflow?.needsImage) ? 'image' : null),
       prompt: fullPrompt,
       negativePrompt,
       tags: selectedTags,
