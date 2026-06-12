@@ -1554,7 +1554,7 @@ export const exportTimeline = async (options = {}, onProgress = () => {}) => {
         throw new Error('Failed to write frame to FFmpeg pipe.')
       }
     } else {
-      await platform.writeFrame(canvas, framesFolder, frameIndex, fps, format)
+      await platform.writeFrame(canvas, framesFolder, frameIndex, fps)
     }
     
     if (frameIndex % 5 === 0) {
