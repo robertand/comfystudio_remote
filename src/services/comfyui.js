@@ -582,6 +582,8 @@ class ComfyUIService {
     if (!config) return false
     if (typeof window === 'undefined') return false
     if (window.electronAPI) return false
+    // Always proxy for remote servers to avoid CORS
+    if (config.mode === 'remote') return true
     // When accessed through a tunnel (not localhost), always proxy
     // to avoid mixed-content (HTTPS page → HTTP fetch) and CORS issues.
     const hostname = window.location.hostname

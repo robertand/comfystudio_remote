@@ -114,9 +114,9 @@ class ManagedWebSocket {
   getWsBase() {
     const config = this.manager.getConfig(this.serverId)
     if (!config) return 'ws://127.0.0.1:8188'
-    // When accessed through a tunnel, use the proxy WS URL (same-origin)
-    // to avoid mixed-content (HTTPS page → WS unencrypted).
-    if (this.manager.isUsingProxy()) {
+    // When accessed through a tunnel or connecting to a remote server,
+    // use the proxy WS URL (same-origin) to avoid CORS and mixed-content.
+    if (this.manager.isUsingProxy() || config.mode === 'remote') {
       const prefix = this.manager.getProxyPrefix()
       return `${window.location.origin.replace(/^http/, 'ws')}${prefix}`
     }
@@ -393,7 +393,7 @@ class ComfyUIConnectionManager {
     const config = this.getActiveConfig()
     if (!config) return 'http://127.0.0.1:8188'
     const direct = normalizeUrl(config).http
-    if (this.isUsingProxy()) {
+    if (this.isUsingProxy() || config.mode === 'remote') {
       const proxyPrefix = this.getProxyPrefix()
       return `${window.location.origin}${proxyPrefix}`
     }
@@ -404,7 +404,7 @@ class ComfyUIConnectionManager {
     const config = this.getActiveConfig()
     if (!config) return 'ws://127.0.0.1:8188'
     const direct = normalizeUrl(config).ws
-    if (this.isUsingProxy()) {
+    if (this.isUsingProxy() || config.mode === 'remote') {
       const proxyPrefix = this.getProxyPrefix()
       return `${window.location.origin.replace(/^http/, 'ws')}${proxyPrefix}`
     }
@@ -563,6 +563,10 @@ class ComfyUIConnectionManager {
       // Behind Vite proxy — only the proxy URL works (direct URL is CORS-blocked)
       const prefix = this.getProxyPrefix()
       urlsToTry.push(`${window.location.origin}${prefix}`)
+    } else if (config.mode === 'remote') {
+      // Remote server accessed from localhost — must proxy to avoid CORS
+      const prefix = this.getProxyPrefix()
+      urlsToTry.push(`${window.location.origin}${prefix}`)
     } else {
       // Direct URL (localhost or same-origin)
       urlsToTry.push(directUrl)
@@ -678,7 +682,7 @@ class ComfyUIConnectionManager {
         if (config && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
           window.dispatchEvent(new CustomEvent('comfystudio-comfy-connection-changed', {
             detail: {
-              httpBase: this.isUsingProxy() ? this.getActiveProxyHttpBase() : this.getActiveHttpBase(),
+              httpBase: this.isUsingProxy() || config.mode === 'remote' ? this.getActiveProxyHttpBase() : this.getActiveHttpBase(),
               serverId: this.activeServerId,
               mode: config.mode,
             },
